@@ -1,0 +1,20 @@
+schema message {
+  document message {
+    field id type string {
+      indexing: attribute | summary
+    }
+    field text type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+    field chat_id type string {
+      indexing: attribute | summary
+    }
+    field date type int {
+      indexing: attribute | summary
+    }
+  }
+  fieldset default { fields: text }
+  # Use implicit default summary; explicit definitions removed to avoid conflicts
+  rank-profile default { first-phase { expression: bm25(text) } }
+}

@@ -1,5 +1,3 @@
 <deployment version="1.0">
-  <environment>
-    <prod />
-  </environment>
+  <prod />
 </deployment>

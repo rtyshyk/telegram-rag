@@ -1,6 +1,62 @@
 # Telegram RAG Chat
 
-Personal, Dockerized RAG (Retrieval-Augmented Generation) over **your Telegram**: index private DMs, groups, channels, and Saved Messages, then search or chat over them via a lightweight web UI.
+Personal, Dockerized RA- **Auto-deploy Vespa `application.zip` on container start; fail fast on schema mismatch**
+
+---
+
+## Architecture
+
+```
+[indexer]  ── Telethon daemon/--once → chunk → cache → OpenAI embed → Vespa upsert
+     │
+     ├── Postgres (sync_state, embedding_cache, chunks)
+     └── Tele---
+
+## Troubleshooting
+
+### Vespa Deployment
+
+The Vespa application is **automatically deployed** when you run `docker compose up`. If you need to manually redeploy:
+
+```bash
+# Manual deployment using the deployment script
+./scripts/deploy-vespa.sh
+
+# Or deploy from a running container
+docker run --rm --network telegram-rag_default \
+  -v $(pwd)/vespa/application:/app/application:ro \
+  alpine/curl:latest sh -c "
+    apk add --no-cache zip jq bash &&
+    cd /app &&
+    zip -r application.zip application/ &&
+    curl -sf --data-binary @application.zip \
+      http://vespa:19071/application/v2/tenant/default/prepareandactivate
+  "
+
+# Check deployment status
+curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.generation'
+```
+
+### Common Issues
+
+- **Can't login** → verify `APP_USER` and `APP_USER_HASH_BCRYPT`; check time drift for cookie expiry.
+- **Indexer stalls** → confirm Telethon session exists on volume; check rate-limit backoff logs.
+- **No search results** → ensure Vespa app deployed (container logs) and embeddings present.
+- **Rerank skipped** → set `COHERE_API_KEY` and `RERANK_ENABLED=true`.
+- **Vespa deployment fails** → check `docker compose logs vespa-deploy` for errors; verify application package structure.
+
+---ion (on a Docker volume)
+
+[api] FastAPI  ── /search → Vespa hybrid
+                 /chat   → retrieve → (optional rerank) → compress → LLM answer + citations
+                 /auth, /models, /chats
+
+[ui] Astro+React ─ login, filters, search, ask AI (stores model label in localStorage)
+
+[vespa-deploy] ── Auto-deploy Vespa application package on startup
+```
+
+---ed Generation) over **your Telegram**: index private DMs, groups, channels, and Saved Messages, then search or chat over them via a lightweight web UI.
 
 - **Ingestion & API:** Python (Telethon + FastAPI)
 - **UI:** Astro + React
@@ -90,6 +146,8 @@ docker compose up -d --build
 ./scripts/smoke_tests.sh         # optional simple checks
 ```
 
+The Vespa application will be **automatically deployed** when the stack starts. The `vespa-deploy` service waits for Vespa to be healthy and then deploys the application package.
+
 - UI: http://localhost:3000
 - API health: http://localhost:8000/healthz
 - Vespa: http://localhost:19071/ApplicationStatus (example)
@@ -161,7 +219,11 @@ PY
 /api               # FastAPI app (auth, search, chat, models)
 /indexer           # Telethon daemon + --once backfill
 /ui                # Astro + React UI
-/vespa-app         # schemas + services + application.zip builder
+/vespa/application # Vespa application package (schemas, services, etc.)
+/scripts           # Deployment and utility scripts
+  ├─ deploy-vespa.sh      # Automated Vespa deployment script
+  ├─ wait_for_health.sh   # Health check helper
+  └─ smoke_tests.sh       # Basic functionality tests
 /docs
   └─ AGENT_PROMPT.md
 /tests
@@ -169,10 +231,8 @@ PY
   ├─ indexer/      # pytest
   ├─ vespa/        # retrieval golden tests
   └─ ui-e2e/       # Playwright
-scripts/
-  wait_for_health.sh
-  smoke_tests.sh
 docker-compose.yml
+Dockerfile.vespa-deploy  # Vespa deployment container
 .env.example
 ```
 
