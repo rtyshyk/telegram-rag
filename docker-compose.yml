@@ -1,0 +1,85 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vespa:
+    image: vespaengine/vespa
+    environment:
+      VESPA_CONFIGSERVERS: vespa
+    volumes:
+      - vespa_data:/opt/vespa/var
+      - ./vespa/application:/app/application
+    command: >
+      bash -c "/opt/vespa/bin/vespa-start-configserver && \
+               /opt/vespa/bin/vespa-start-services && \
+               /opt/vespa/bin/vespa-deploy prepare /app/application && \
+               /opt/vespa/bin/vespa-deploy activate && \
+               tail -f /dev/null"
+    ports:
+      - "19071:19071"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19071/ApplicationStatus"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  api:
+    build: ./api
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - telethon_session:/sessions
+    depends_on:
+      - postgres
+      - vespa
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ui:
+    build: ./ui
+    environment:
+      - PUBLIC_API_URL=${PUBLIC_API_URL}
+      - PUBLIC_VESPA_URL=${PUBLIC_VESPA_URL}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    build: ./indexer
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - VESPA_ENDPOINT=${VESPA_ENDPOINT}
+    volumes:
+      - telethon_session:/sessions
+    depends_on:
+      - postgres
+      - vespa
+
+volumes:
+  postgres_data:
+  vespa_data:
+  telethon_session:

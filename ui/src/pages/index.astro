@@ -1,0 +1,13 @@
+---
+const apiUrl = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+const vespaUrl = import.meta.env.PUBLIC_VESPA_URL || 'http://localhost:19071';
+---
+<html>
+  <body>
+    <h1>Stack is up</h1>
+    <ul>
+      <li><a href={`${apiUrl}/healthz`}>API Health</a></li>
+      <li><a href={`${vespaUrl}/ApplicationStatus`}>Vespa Status</a></li>
+    </ul>
+  </body>
+</html>

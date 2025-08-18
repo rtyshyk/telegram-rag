@@ -2,12 +2,12 @@
 
 Personal, Dockerized RAG (Retrieval-Augmented Generation) over **your Telegram**: index private DMs, groups, channels, and Saved Messages, then search or chat over them via a lightweight web UI.
 
-- **Ingestion & API:** Python (Telethon + FastAPI)  
-- **UI:** Astro + React  
-- **Retrieval:** Vespa (hybrid vector + BM25 + recency)  
-- **State & cache:** Postgres  
-- **LLM & embeddings:** OpenAI (optional rerank via Cohere)  
-- **Everything in Docker Compose**  
+- **Ingestion & API:** Python (Telethon + FastAPI)
+- **UI:** Astro + React
+- **Retrieval:** Vespa (hybrid vector + BM25 + recency)
+- **State & cache:** Postgres
+- **LLM & embeddings:** OpenAI (optional rerank via Cohere)
+- **Everything in Docker Compose**
 
 > **Privacy note:** This indexes only your account’s content. v1 ignores media (no OCR/ASR) and does not crawl external links. You own the data volumes.
 
@@ -66,34 +66,40 @@ Personal, Dockerized RAG (Retrieval-Augmented Generation) over **your Telegram**
 ## Quick start
 
 ### 1) Prerequisites
+
 - Docker & Docker Compose
 - Your Telegram **API ID/HASH** and phone (for user login)
 - OpenAI API key
 - (Optional) Cohere API key for rerank
 
 ### 2) Clone & configure
+
 ```bash
 git clone <your-repo-url> telegram-rag
 cd telegram-rag
 cp .env.example .env
 ```
+
 Edit `.env` (see [Environment variables](#environment-variables)).
 
 ### 3) Run the stack
+
 ```bash
 docker compose up -d --build
 ./scripts/wait_for_health.sh     # optional helper
 ./scripts/smoke_tests.sh         # optional simple checks
 ```
 
-- UI: http://localhost:3000  
-- API health: http://localhost:8080/healthz  
-- Vespa: http://localhost:8081/ApplicationStatus (example)
+- UI: http://localhost:3000
+- API health: http://localhost:8000/healthz
+- Vespa: http://localhost:19071/ApplicationStatus (example)
 
 ### 4) First backfill
+
 ```bash
 docker compose exec indexer python main.py --once
 ```
+
 This runs a one-shot sync. The **daemon** runs continuously to pick up edits/deletes.
 
 ---
@@ -140,6 +146,7 @@ LOG_LEVEL=INFO
 ```
 
 **Generate bcrypt hash** (example):
+
 ```bash
 python - <<'PY'
 import bcrypt; print(bcrypt.hashpw(b"your-password", bcrypt.gensalt()).decode())
@@ -176,16 +183,19 @@ docker-compose.yml
 ## Design specifics
 
 ### Chunking
+
 - ~800–1200 tokens, ~15% overlap, message-aware (don’t split inside code/links)
 - Prepend: `[YYYY-MM-DD HH:mm • @sender]`
 - **Composed chunk:** `trim(reply_context to N tokens) + "——" + main_message`
 - Metadata: `reply_to_message_id`, `forward_from`, `thread_id`, `has_link`
 
 ### What is **ignored** in v1
+
 - Media content: **voice messages, images, documents**
-- Web page fetching/crawling, OCR, ASR  
+- Web page fetching/crawling, OCR, ASR
 
 ### Retrieval & ranking
+
 - Vespa first-phase rank (example):  
   `1.6 * closeness(vector) + 0.9 * bm25(text) + 0.3 * bm25(exact_terms) + recency_decay(message_date) + thread_boost`
 - Sort toggle: **relevance** vs **recency**
@@ -231,6 +241,7 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 ## Testing & quality
 
 **Python (Indexer + FastAPI)**
+
 - `pytest`, `pytest-asyncio`, `httpx.AsyncClient` for API tests
 - Type & security: `mypy`, `ruff` (lint/format), `bandit`, `pip-audit`
 - Env-driven stubs for deterministic CI:
@@ -239,14 +250,17 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
   - `TELETHON_STUB=1` → synthetic stream of chats/messages/edits/deletes
 
 **Vespa (Hybrid retrieval)**
+
 - Build `application.zip` in CI; boot test container; `prepare/activate`
 - Golden queries (10–20) over seeded fixtures; assert **hit@5 / MRR** minimums; verify filters and recency sort
 
 **UI (Astro + React)**
+
 - Unit: `vitest` + Testing Library; mock API with `msw`
 - E2E: `playwright` against docker-compose (login → filter → search → chat answer with citations)
 
 **Infra & linters**
+
 - `eslint`, `prettier`, `hadolint`, `yamllint`, `gitleaks`
 - **Coverage gates:** Python ≥ **85%**, UI ≥ **80%**
 
@@ -286,17 +300,17 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 
 ## Troubleshooting
 
-- **Can’t login** → verify `APP_USER` and `APP_USER_HASH_BCRYPT`; check time drift for cookie expiry.  
-- **Indexer stalls** → confirm Telethon session exists on volume; check rate-limit backoff logs.  
-- **No search results** → ensure Vespa app deployed (container logs) and embeddings present.  
+- **Can’t login** → verify `APP_USER` and `APP_USER_HASH_BCRYPT`; check time drift for cookie expiry.
+- **Indexer stalls** → confirm Telethon session exists on volume; check rate-limit backoff logs.
+- **No search results** → ensure Vespa app deployed (container logs) and embeddings present.
 - **Rerank skipped** → set `COHERE_API_KEY` and `RERANK_ENABLED=true`.
 
 ---
 
 ### Why these choices?
 
-- **Python + Telethon**: reliable Telegram ingestion & async batching  
-- **Vespa**: first-class hybrid ranking and recency boosting  
-- **Postgres**: safe concurrency & migrations  
-- **Astro + React**: simple, fast UI with minimal state  
+- **Python + Telethon**: reliable Telegram ingestion & async batching
+- **Vespa**: first-class hybrid ranking and recency boosting
+- **Postgres**: safe concurrency & migrations
+- **Astro + React**: simple, fast UI with minimal state
 - **OpenAI**: excellent multi-lingual embeddings & models; optional Cohere rerank

@@ -1,0 +1,5 @@
+<hosts>
+  <host name="vespa">
+    <alias>vespa</alias>
+  </host>
+</hosts>
