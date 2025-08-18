@@ -1,1 +1,302 @@
-# telegram-rag
+# Telegram RAG Chat
+
+Personal, Dockerized RAG (Retrieval-Augmented Generation) over **your Telegram**: index private DMs, groups, channels, and Saved Messages, then search or chat over them via a lightweight web UI.
+
+- **Ingestion & API:** Python (Telethon + FastAPI)  
+- **UI:** Astro + React  
+- **Retrieval:** Vespa (hybrid vector + BM25 + recency)  
+- **State & cache:** Postgres  
+- **LLM & embeddings:** OpenAI (optional rerank via Cohere)  
+- **Everything in Docker Compose**  
+
+> **Privacy note:** This indexes only your account’s content. v1 ignores media (no OCR/ASR) and does not crawl external links. You own the data volumes.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Environment variables](#environment-variables)
+- [Directory layout](#directory-layout)
+- [Design specifics](#design-specifics)
+- [API quick reference](#api-quick-reference)
+- [Testing & quality](#testing--quality)
+- [Roadmap & acceptance (MVP stages)](#roadmap--acceptance-mvp-stages)
+- [Agent prompt (Codex)](#agent-prompt-codex)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Features
+
+- Index all Telegram messages (DMs, groups, channels, Saved Messages)
+- Web UI with secure login (bcrypt hash in env)
+- Hybrid search (vector + BM25) with recency sort
+- Chat/RAG answers with in-line citations (chat, date, deep link)
+- Smart chunking with reply/forward/thread context
+- Embedding cache & idempotent upserts (no re-embedding unchanged text)
+- Filters: chat(s) multi-select, sender, type, date range, `has_link`, sort by recency
+- Optional **rerank** with Cohere Rerank v3 (auto-skip if no key)
+- Dry-run cost estimate, backoff/retries, consistency sweep
+- Auto-deploy Vespa `application.zip` on container start; fail fast on schema mismatch
+
+---
+
+## Architecture
+
+```
+[indexer]  ── Telethon daemon/--once → chunk → cache → OpenAI embed → Vespa upsert
+     │
+     ├── Postgres (sync_state, embedding_cache, chunks)
+     └── Telethon .session (on a Docker volume)
+
+[api] FastAPI  ── /search → Vespa hybrid
+                 /chat   → retrieve → (optional rerank) → compress → LLM answer + citations
+                 /auth, /models, /chats
+
+[ui] Astro+React ─ login, filters, search, ask AI (stores model label in localStorage)
+```
+
+---
+
+## Quick start
+
+### 1) Prerequisites
+- Docker & Docker Compose
+- Your Telegram **API ID/HASH** and phone (for user login)
+- OpenAI API key
+- (Optional) Cohere API key for rerank
+
+### 2) Clone & configure
+```bash
+git clone <your-repo-url> telegram-rag
+cd telegram-rag
+cp .env.example .env
+```
+Edit `.env` (see [Environment variables](#environment-variables)).
+
+### 3) Run the stack
+```bash
+docker compose up -d --build
+./scripts/wait_for_health.sh     # optional helper
+./scripts/smoke_tests.sh         # optional simple checks
+```
+
+- UI: http://localhost:3000  
+- API health: http://localhost:8080/healthz  
+- Vespa: http://localhost:8081/ApplicationStatus (example)
+
+### 4) First backfill
+```bash
+docker compose exec indexer python main.py --once
+```
+This runs a one-shot sync. The **daemon** runs continuously to pick up edits/deletes.
+
+---
+
+## Environment variables
+
+Minimal set:
+
+```ini
+OPENAI_API_KEY=sk-...
+
+# Optional rerank (Cohere)
+COHERE_API_KEY=
+
+# Telegram user auth (Telethon)
+TG_API_ID=123456
+TG_API_HASH=abcdef1234567890abcdef12
+TG_PHONE=+123456789
+
+# Auth for Web UI (FastAPI)
+APP_USER=admin
+APP_USER_HASH_BCRYPT=$2b$12$...     # bcrypt of your password (see below)
+
+# Postgres
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=telegram_rag
+POSTGRES_USER=rag
+POSTGRES_PASSWORD=ragpass
+
+# Vespa
+VESPA_ENDPOINT=http://vespa:8080
+
+# Indexing / ranking
+EMBED_MODEL=text-embedding-3-large
+CHUNKING_VERSION=1
+PREPROCESS_VERSION=1
+RECENCY_HALFLIFE_DAYS=90
+RERANK_ENABLED=true                 # ignored if COHERE_API_KEY missing
+DAILY_EMBED_BUDGET_USD=0            # 0 disables budget guard
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+**Generate bcrypt hash** (example):
+```bash
+python - <<'PY'
+import bcrypt; print(bcrypt.hashpw(b"your-password", bcrypt.gensalt()).decode())
+PY
+```
+
+---
+
+## Directory layout
+
+```
+/api               # FastAPI app (auth, search, chat, models)
+/indexer           # Telethon daemon + --once backfill
+/ui                # Astro + React UI
+/vespa-app         # schemas + services + application.zip builder
+/docs
+  └─ AGENT_PROMPT.md
+/tests
+  ├─ api/          # pytest
+  ├─ indexer/      # pytest
+  ├─ vespa/        # retrieval golden tests
+  └─ ui-e2e/       # Playwright
+scripts/
+  wait_for_health.sh
+  smoke_tests.sh
+docker-compose.yml
+.env.example
+```
+
+> **Note:** The Telethon `.session` file is persisted on a Docker volume (not baked into images).
+
+---
+
+## Design specifics
+
+### Chunking
+- ~800–1200 tokens, ~15% overlap, message-aware (don’t split inside code/links)
+- Prepend: `[YYYY-MM-DD HH:mm • @sender]`
+- **Composed chunk:** `trim(reply_context to N tokens) + "——" + main_message`
+- Metadata: `reply_to_message_id`, `forward_from`, `thread_id`, `has_link`
+
+### What is **ignored** in v1
+- Media content: **voice messages, images, documents**
+- Web page fetching/crawling, OCR, ASR  
+
+### Retrieval & ranking
+- Vespa first-phase rank (example):  
+  `1.6 * closeness(vector) + 0.9 * bm25(text) + 0.3 * bm25(exact_terms) + recency_decay(message_date) + thread_boost`
+- Sort toggle: **relevance** vs **recency**
+- Optional rerank: **Cohere Rerank v3** (if key present)
+
+---
+
+## API quick reference
+
+Auth cookie is HTTP-only (login first).
+
+```bash
+# Login
+curl -i -X POST http://localhost:8080/auth/login   -H 'Content-Type: application/json'   -d '{"username":"admin","password":"<your-password>"}'
+
+# List models (UI labels → OpenAI IDs from env)
+curl -b cookies.txt -c cookies.txt http://localhost:8080/models
+
+# Search
+curl -b cookies.txt -X POST http://localhost:8080/search   -H 'Content-Type: application/json'   -d '{
+    "q": "ssh key from last week",
+    "k": 12,
+    "filters": {
+      "chat_ids": ["123456789"],
+      "date_from": "2025-08-01",
+      "date_to": "2025-08-18"
+    },
+    "sort": "recency"
+  }'
+
+# Chat (RAG)
+curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: application/json'   -d '{
+    "q": "Send me the Postgres connection string we discussed",
+    "k": 12,
+    "model_label": "gpt 5",           // or "gpt5 mini", "gpt5 nano"
+    "filters": { "chat_ids": ["..."] },
+    "rerank": true
+  }'
+```
+
+---
+
+## Testing & quality
+
+**Python (Indexer + FastAPI)**
+- `pytest`, `pytest-asyncio`, `httpx.AsyncClient` for API tests
+- Type & security: `mypy`, `ruff` (lint/format), `bandit`, `pip-audit`
+- Env-driven stubs for deterministic CI:
+  - `OPENAI_STUB=1` → deterministic 3072-dim vector from SHA256(text)
+  - `COHERE_STUB=1` → simple overlap score
+  - `TELETHON_STUB=1` → synthetic stream of chats/messages/edits/deletes
+
+**Vespa (Hybrid retrieval)**
+- Build `application.zip` in CI; boot test container; `prepare/activate`
+- Golden queries (10–20) over seeded fixtures; assert **hit@5 / MRR** minimums; verify filters and recency sort
+
+**UI (Astro + React)**
+- Unit: `vitest` + Testing Library; mock API with `msw`
+- E2E: `playwright` against docker-compose (login → filter → search → chat answer with citations)
+
+**Infra & linters**
+- `eslint`, `prettier`, `hadolint`, `yamllint`, `gitleaks`
+- **Coverage gates:** Python ≥ **85%**, UI ≥ **80%**
+
+---
+
+## Roadmap & acceptance (MVP stages)
+
+1. **Stage 0 — Repo & Compose**  
+   Stack boots; Vespa auto-deploys `application.zip`; API `/healthz` 200; UI shell loads.
+
+2. **Stage 1 — Auth & Models**  
+   Login w/ bcrypt from env; cookie session; rate-limited; UI model picker (saved to localStorage).
+
+3. **Stage 2 — Ingestion**  
+   Telethon daemon + `--once`; Postgres migrations; chunker; embedding cache; edits/deletes handled; dry-run cost.
+
+4. **Stage 3 — Search**  
+   Vespa hybrid query + filters; recency sort; UI search with filters; performance stable.
+
+5. **Stage 4 — Chat/RAG**  
+   Retrieve → compress → LLM answer with citations; token/latency logs; no history.
+
+6. **Stage 5 — Rerank (optional)**  
+   Cohere v3 rerank when key present; guardrails to skip if strong signals; measured improvement on golden set.
+
+7. **Stage 6 — Consistency & Ops**  
+   7-day consistency sweep; weekly purge; backoff with jitter; optional daily budget guard.
+
+## Security
+
+- Single-user auth with **bcrypt** hash in env, session as **HTTP-only** cookie
+- Login rate-limit; avoid logging message bodies by default (redacted debug mode)
+- Telethon session stored on volume; **never** commit secrets; use `.env` & `.env.example`
+- If exposing publicly: terminate TLS at reverse proxy and consider IP allow-list
+
+---
+
+## Troubleshooting
+
+- **Can’t login** → verify `APP_USER` and `APP_USER_HASH_BCRYPT`; check time drift for cookie expiry.  
+- **Indexer stalls** → confirm Telethon session exists on volume; check rate-limit backoff logs.  
+- **No search results** → ensure Vespa app deployed (container logs) and embeddings present.  
+- **Rerank skipped** → set `COHERE_API_KEY` and `RERANK_ENABLED=true`.
+
+---
+
+### Why these choices?
+
+- **Python + Telethon**: reliable Telegram ingestion & async batching  
+- **Vespa**: first-class hybrid ranking and recency boosting  
+- **Postgres**: safe concurrency & migrations  
+- **Astro + React**: simple, fast UI with minimal state  
+- **OpenAI**: excellent multi-lingual embeddings & models; optional Cohere rerank
