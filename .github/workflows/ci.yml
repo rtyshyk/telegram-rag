@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: pip install pre-commit
+      - run: pre-commit run --all-files
+      - run: cp .env.example .env
+      - run: docker compose up -d --build
+      - run: ./scripts/wait_for_health.sh
+      - run: ./scripts/smoke_tests.sh
