@@ -137,7 +137,11 @@ curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.gene
 git clone <your-repo-url> telegram-rag
 cd telegram-rag
 cp .env.example .env
-````
+
+# Set up development tools (recommended)
+brew install pre-commit  # or pip install pre-commit
+pre-commit install       # Install git hooks for code formatting
+```
 
 Edit `.env` (see [Environment variables](#environment-variables)).
 
@@ -227,13 +231,14 @@ PY
   ├─ deploy-vespa.sh      # Automated Vespa deployment script
   ├─ wait_for_health.sh   # Health check helper
   └─ smoke_tests.sh       # Basic functionality tests
-/docs
-  └─ AGENT_PROMPT.md
+/.github
+  └─ copilot-instructions.md  # GitHub Copilot development guidelines
 /tests
   ├─ api/          # pytest
   ├─ indexer/      # pytest
   ├─ vespa/        # retrieval golden tests
   └─ ui-e2e/       # Playwright
+.pre-commit-config.yaml   # Code formatting & linting hooks
 docker-compose.yml
 Dockerfile.vespa-deploy  # Vespa deployment container
 .env.example
@@ -259,7 +264,7 @@ Dockerfile.vespa-deploy  # Vespa deployment container
 
 ### Retrieval & ranking
 
-- Vespa first-phase rank (example):  
+- Vespa first-phase rank (example):
   `1.6 * closeness(vector) + 0.9 * bm25(text) + 0.3 * bm25(exact_terms) + recency_decay(message_date) + thread_boost`
 - Sort toggle: **relevance** vs **recency**
 - Optional rerank: **Cohere Rerank v3** (if key present)
@@ -301,7 +306,55 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 
 ---
 
+## Development Workflow
+
+**After implementing any feature, always run:**
+
+```bash
+# Format and lint all code
+pre-commit run --all-files
+
+# Or run specific checks
+pre-commit run black prettier shfmt
+
+# Commit with properly formatted code
+git add .
+git commit -m "feat: your feature description"
+```
+
+**Required before pushing:**
+- All pre-commit hooks must pass
+- Tests should pass (if applicable)
+- Documentation updated for new features
+
+---
+
 ## Testing & quality
+
+**Pre-commit hooks & Code formatting**
+
+All code is automatically formatted and linted using pre-commit hooks:
+
+```bash
+# Install pre-commit (one-time setup)
+brew install pre-commit  # or pip install pre-commit
+
+# Install hooks for this repository
+pre-commit install
+
+# Run hooks manually on all files
+pre-commit run --all-files
+
+# Run specific hooks
+pre-commit run black        # Python formatting
+pre-commit run prettier     # Markdown/JSON formatting
+pre-commit run shfmt        # Shell script formatting
+```
+
+**Hooks configured:**
+- `black` - Python code formatting
+- `prettier` - Markdown, JSON, YAML formatting
+- `shfmt` - Shell script formatting
 
 **Python (Indexer + FastAPI)**
 
@@ -331,25 +384,25 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 
 ## Roadmap & acceptance (MVP stages)
 
-1. **Stage 0 — Repo & Compose**  
+1. **Stage 0 — Repo & Compose**
    Stack boots; Vespa auto-deploys `application.zip`; API `/healthz` 200; UI shell loads.
 
-2. **Stage 1 — Auth & Models**  
+2. **Stage 1 — Auth & Models**
    Login w/ bcrypt from env; cookie session; rate-limited; UI model picker (saved to localStorage).
 
-3. **Stage 2 — Ingestion**  
+3. **Stage 2 — Ingestion**
    Telethon daemon + `--once`; Postgres migrations; chunker; embedding cache; edits/deletes handled; dry-run cost.
 
-4. **Stage 3 — Search**  
+4. **Stage 3 — Search**
    Vespa hybrid query + filters; recency sort; UI search with filters; performance stable.
 
-5. **Stage 4 — Chat/RAG**  
+5. **Stage 4 — Chat/RAG**
    Retrieve → compress → LLM answer with citations; token/latency logs; no history.
 
-6. **Stage 5 — Rerank (optional)**  
+6. **Stage 5 — Rerank (optional)**
    Cohere v3 rerank when key present; guardrails to skip if strong signals; measured improvement on golden set.
 
-7. **Stage 6 — Consistency & Ops**  
+7. **Stage 6 — Consistency & Ops**
    7-day consistency sweep; weekly purge; backoff with jitter; optional daily budget guard.
 
 ## Security
@@ -377,3 +430,4 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 - **Postgres**: safe concurrency & migrations
 - **Astro + React**: simple, fast UI with minimal state
 - **OpenAI**: excellent multi-lingual embeddings & models; optional Cohere rerank
+````
