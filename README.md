@@ -6,7 +6,7 @@ Personal, Dockerized RA- **Auto-deploy Vespa `application.zip` on container star
 
 ## Architecture
 
-```
+````
 [indexer]  ── Telethon daemon/--once → chunk → cache → OpenAI embed → Vespa upsert
      │
      ├── Postgres (sync_state, embedding_cache, chunks)
@@ -35,7 +35,7 @@ docker run --rm --network telegram-rag_default \
 
 # Check deployment status
 curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.generation'
-```
+````
 
 ### Common Issues
 
@@ -47,13 +47,14 @@ curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.gene
 
 ---ion (on a Docker volume)
 
-[api] FastAPI  ── /search → Vespa hybrid
-                 /chat   → retrieve → (optional rerank) → compress → LLM answer + citations
-                 /auth, /models, /chats
+[api] FastAPI ── /search → Vespa hybrid
+/chat → retrieve → (optional rerank) → compress → LLM answer + citations
+/auth, /models, /chats
 
 [ui] Astro+React ─ login, filters, search, ask AI (stores model label in localStorage)
 
 [vespa-deploy] ── Auto-deploy Vespa application package on startup
+
 ```
 
 ---ed Generation) over **your Telegram**: index private DMs, groups, channels, and Saved Messages, then search or chat over them via a lightweight web UI.
@@ -105,17 +106,19 @@ curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.gene
 ## Architecture
 
 ```
-[indexer]  ── Telethon daemon/--once → chunk → cache → OpenAI embed → Vespa upsert
-     │
-     ├── Postgres (sync_state, embedding_cache, chunks)
-     └── Telethon .session (on a Docker volume)
 
-[api] FastAPI  ── /search → Vespa hybrid
-                 /chat   → retrieve → (optional rerank) → compress → LLM answer + citations
-                 /auth, /models, /chats
+[indexer] ── Telethon daemon/--once → chunk → cache → OpenAI embed → Vespa upsert
+│
+├── Postgres (sync_state, embedding_cache, chunks)
+└── Telethon .session (on a Docker volume)
+
+[api] FastAPI ── /search → Vespa hybrid
+/chat → retrieve → (optional rerank) → compress → LLM answer + citations
+/auth, /models, /chats
 
 [ui] Astro+React ─ login, filters, search, ask AI (stores model label in localStorage)
-```
+
+````
 
 ---
 
@@ -134,7 +137,7 @@ curl -s http://localhost:19071/ApplicationStatus | jq -r '.application.meta.gene
 git clone <your-repo-url> telegram-rag
 cd telegram-rag
 cp .env.example .env
-```
+````
 
 Edit `.env` (see [Environment variables](#environment-variables)).
 
