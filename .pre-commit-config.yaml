@@ -8,7 +8,8 @@ repos:
     hooks:
       - id: prettier
         additional_dependencies:
-          - prettier-plugin-astro
+          - prettier@3.0.0
+          - prettier-plugin-astro@0.14.1
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.7.0-1
     hooks:
