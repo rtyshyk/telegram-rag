@@ -1,13 +1,13 @@
 import React from "react";
 import { render, fireEvent, waitFor } from "@testing-library/react";
-import LoginForm from "../LoginForm";
+import LoginForm from "../../../src/components/LoginForm";
 import { vi, test, expect } from "vitest";
 
-vi.mock("../../lib/api", () => ({
+vi.mock("../../../src/lib/api", () => ({
   login: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { login } = await import("../../lib/api");
+const { login } = await import("../../../src/lib/api");
 
 test("LoginForm posts credentials", async () => {
   Object.defineProperty(window, "location", {
@@ -17,7 +17,7 @@ test("LoginForm posts credentials", async () => {
   const { getByLabelText, getByRole } = render(<LoginForm />);
   fireEvent.change(getByLabelText(/Username/), { target: { value: "a" } });
   fireEvent.change(getByLabelText(/Password/), { target: { value: "b" } });
-  fireEvent.click(getByRole("button", { name: /Login/ }));
+  fireEvent.click(getByRole("button", { name: /Sign in/ }));
   await waitFor(() => {
     expect(login).toHaveBeenCalledWith("a", "b");
   });
