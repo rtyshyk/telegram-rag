@@ -21,3 +21,22 @@ jobs:
       - run: docker compose up -d --build
       - run: ./scripts/wait_for_health.sh
       - run: ./scripts/smoke_tests.sh
+
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r api/requirements.txt pytest
+      - run: pytest api/tests
+
+  ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd ui && npm install && npm test
