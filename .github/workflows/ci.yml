@@ -39,7 +39,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: cd ui && npm install && npm test
+      - name: Install UI dependencies
+        working-directory: ./ui
+        run: npm ci
+      - name: Run unit tests
+        working-directory: ./ui
+        run: npm run test:unit
 
   e2e-tests:
     runs-on: ubuntu-latest

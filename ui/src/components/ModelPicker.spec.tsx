@@ -18,7 +18,7 @@ test("ModelPicker loads options and stores selection", async () => {
   await waitFor(() => {
     expect(fetchModels).toHaveBeenCalled();
   });
-  
+
   // The component uses a button, not a combobox
   const button = getByRole("button", { name: /gpt 5/ });
   expect(button).toBeInTheDocument();
