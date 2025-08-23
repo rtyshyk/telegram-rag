@@ -12,16 +12,20 @@ from .auth import (
 from .settings import settings
 
 app = FastAPI()
-app.add_middleware(AuthMiddleware)
 
-if settings.ui_origin:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[settings.ui_origin],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# Add CORS middleware first
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:4321",
+        "http://localhost:3000",
+    ],  # Both dev and prod UI ports
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.add_middleware(AuthMiddleware)
 
 
 @app.get("/healthz")

@@ -3,3 +3,7 @@ __pycache__/
 node_modules/
 ui/node_modules/
 ui/dist/
+.playwright-mcp/
+ui/playwright-report/
+ui/test-results/
+.venv/

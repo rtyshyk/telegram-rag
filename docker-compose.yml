@@ -12,12 +12,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   vespa:
     image: vespaengine/vespa
     hostname: vespa
     environment:
       VESPA_CONFIGSERVERS: vespa
+      VESPA_IGNORE_NOT_ENOUGH_MEMORY: "true"
     volumes:
       - vespa_data:/opt/vespa/var
     ports:
@@ -28,6 +35,12 @@ services:
       interval: 10s
       timeout: 10s
       retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
 
   vespa-deploy:
     build:
@@ -62,6 +75,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   ui:
     build: ./ui
@@ -77,6 +96,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
   indexer:
     build: ./indexer
@@ -90,6 +115,12 @@ services:
         condition: service_healthy
       vespa-deploy:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
 volumes:
   postgres_data:
