@@ -8,6 +8,8 @@
     "start": "astro preview",
     "dev": "astro dev",
     "test": "vitest",
+    "test:unit": "vitest --run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
