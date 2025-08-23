@@ -225,6 +225,9 @@ RECENCY_HALFLIFE_DAYS=90
 RERANK_ENABLED=true                 # ignored if COHERE_API_KEY missing
 DAILY_EMBED_BUDGET_USD=0            # 0 disables budget guard
 
+# GitHub MCP Integration (optional)
+GITHUB_PERSONAL_ACCESS_TOKEN=ghp_... # GitHub personal access token for MCP
+
 # Logging
 LOG_LEVEL=INFO
 ```
@@ -239,6 +242,58 @@ PY
 
 ---
 
+## GitHub MCP Integration
+
+This project includes GitHub Model Context Protocol (MCP) integration for enhanced development workflows and repository management.
+
+### Setup
+
+1. **Generate a GitHub Personal Access Token:**
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Generate a new token with the following scopes:
+     - `repo` (for repository access)
+     - `read:org` (for organization access)
+     - `read:user` (for user profile access)
+     - `workflow` (for GitHub Actions access, if needed)
+
+2. **Configure the token:**
+   ```bash
+   # Add to your .env file
+   GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_personal_access_token_here
+   ```
+
+3. **MCP Configuration:**
+   The `mcp-config.json` file is already configured to use the GitHub MCP server. It will automatically use your token from the environment variable.
+
+### Available Features
+
+With GitHub MCP integration, you can:
+
+- **Repository Management**: Create, clone, and manage repositories
+- **Issue Tracking**: Create, update, and search GitHub issues
+- **Pull Requests**: Create and manage pull requests
+- **File Operations**: Read, create, and update files in repositories
+- **Branch Management**: Create and switch between branches
+- **GitHub Actions**: Monitor and manage workflow runs
+- **Release Management**: Create and manage releases
+
+### Usage with AI Assistants
+
+When using AI assistants (like GitHub Copilot or Claude), the MCP integration allows them to:
+- Access your GitHub repositories and understand the project structure
+- Help with code reviews and pull request management
+- Automate issue creation and tracking
+- Assist with release planning and deployment workflows
+
+### Security Notes
+
+- Keep your GitHub token secure and never commit it to version control
+- Use the principle of least privilege when setting token scopes
+- Regularly rotate your personal access tokens
+- Consider using fine-grained personal access tokens for better security
+
+---
+
 ## Directory layout
 
 ```
@@ -249,7 +304,8 @@ PY
 /scripts           # Deployment and utility scripts
   ├─ deploy-vespa.sh      # Automated Vespa deployment script
   ├─ wait_for_health.sh   # Health check helper
-  └─ smoke_tests.sh       # Basic functionality tests
+  ├─ smoke_tests.sh       # Basic functionality tests
+  └─ setup-github-mcp.sh  # GitHub MCP integration setup
 /.github
   └─ copilot-instructions.md  # GitHub Copilot development guidelines
 /tests
@@ -260,6 +316,7 @@ PY
 .pre-commit-config.yaml   # Code formatting & linting hooks
 docker-compose.yml
 Dockerfile.vespa-deploy  # Vespa deployment container
+mcp-config.json          # GitHub MCP server configuration
 .env.example
 ```
 
