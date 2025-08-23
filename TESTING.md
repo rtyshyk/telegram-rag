@@ -7,7 +7,7 @@ This project includes comprehensive testing with unit tests, integration tests, 
 ```
 ui/tests/
 ├── login.spec.ts          # Login functionality tests
-├── chat.spec.ts           # Chat interface tests  
+├── chat.spec.ts           # Chat interface tests
 ├── integration.spec.ts    # Navigation, error handling, performance
 ├── workflows.spec.ts      # Complete user workflow tests
 └── utils/
@@ -60,6 +60,7 @@ python -m pytest tests/ -v       # Run tests with verbose output
 ### 🧪 Test Categories
 
 1. **Login Tests** (`login.spec.ts`)
+
    - Form validation
    - Authentication flow
    - Error handling (401, 429, timeouts)
@@ -67,6 +68,7 @@ python -m pytest tests/ -v       # Run tests with verbose output
    - Accessibility
 
 2. **Chat Interface** (`chat.spec.ts`)
+
    - Message sending and display
    - Model selection
    - Typing indicators
@@ -74,6 +76,7 @@ python -m pytest tests/ -v       # Run tests with verbose output
    - Keyboard shortcuts
 
 3. **Integration Tests** (`integration.spec.ts`)
+
    - Routing and navigation
    - Error handling
    - Responsive design
@@ -93,24 +96,24 @@ The `TestUtils` class provides reusable methods:
 const utils = new TestUtils(page);
 
 // Authentication
-await utils.login('admin', 'password');
+await utils.login("admin", "password");
 await utils.mockAuth();
 
 // API mocking
 await utils.mockAPI();
-await utils.mockNetworkError('**/auth/login');
-await utils.mockSlowResponse('**/models', 5000);
+await utils.mockNetworkError("**/auth/login");
+await utils.mockSlowResponse("**/models", 5000);
 
 // Chat actions
-await utils.sendMessage('Hello');
-await utils.selectModel('GPT-4');
+await utils.sendMessage("Hello");
+await utils.selectModel("GPT-4");
 
 // Assertions
 await utils.assertAuthenticated();
 await utils.assertNotAuthenticated();
 
 // Utilities
-await utils.screenshot('debug-image');
+await utils.screenshot("debug-image");
 await utils.checkAccessibility();
 ```
 
@@ -119,6 +122,7 @@ await utils.checkAccessibility();
 ### GitHub Actions
 
 Tests run automatically on:
+
 - Push to `main` or `develop` branches
 - Pull requests
 
@@ -147,7 +151,7 @@ POST /auth/login
 - rate-limited/* → 429 (rate limit)
 - anything else → 401 (invalid)
 
-// Models endpoint  
+// Models endpoint
 GET /models
 - Returns: [{ id: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }, ...]
 
@@ -161,10 +165,10 @@ POST /auth/logout
 ### Basic Test Structure
 
 ```typescript
-import { test, expect } from '@playwright/test';
-import { TestUtils } from './utils/test-utils';
+import { test, expect } from "@playwright/test";
+import { TestUtils } from "./utils/test-utils";
 
-test.describe('Feature Name', () => {
+test.describe("Feature Name", () => {
   let utils: TestUtils;
 
   test.beforeEach(async ({ page }) => {
@@ -172,7 +176,7 @@ test.describe('Feature Name', () => {
     await utils.mockAPI(); // Mock APIs if needed
   });
 
-  test('should do something', async ({ page }) => {
+  test("should do something", async ({ page }) => {
     // Test implementation
   });
 });
@@ -191,22 +195,24 @@ test.describe('Feature Name', () => {
 ### Example Test
 
 ```typescript
-test('complete login and chat workflow', async ({ page }) => {
+test("complete login and chat workflow", async ({ page }) => {
   // Setup
   await utils.mockAPI();
-  
+
   // Login
   await utils.login();
   await utils.assertAuthenticated();
-  
+
   // Use chat
   await utils.waitForModelsLoaded();
-  await utils.selectModel('GPT-4');
-  await utils.sendMessage('Hello!');
-  
+  await utils.selectModel("GPT-4");
+  await utils.sendMessage("Hello!");
+
   // Verify
-  await expect(page.locator('.bg-blue-600').locator('text=Hello!')).toBeVisible();
-  
+  await expect(
+    page.locator(".bg-blue-600").locator("text=Hello!"),
+  ).toBeVisible();
+
   // Cleanup
   await page.click('button:has-text("Logout")');
   await utils.assertNotAuthenticated();
@@ -240,6 +246,7 @@ npx playwright test -g "should login successfully"
 ## Configuration
 
 Key configuration files:
+
 - `playwright.config.ts` - Main Playwright configuration
 - `.github/workflows/ci.yml` - CI pipeline
 - `.github/workflows/e2e-tests.yml` - Dedicated E2E testing workflow

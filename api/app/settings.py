@@ -6,9 +6,9 @@ class Settings(BaseSettings):
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"  # Allow extra fields in environment variables
+        extra="ignore",  # Allow extra fields in environment variables
     )
-    
+
     app_user: str
     app_user_hash_bcrypt: str
     session_secret: str

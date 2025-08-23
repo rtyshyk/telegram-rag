@@ -4,3 +4,6 @@ psycopg2-binary
 bcrypt
 PyJWT
 pydantic-settings
+httpx
+pytest
+pytest-asyncio
