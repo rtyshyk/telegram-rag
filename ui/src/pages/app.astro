@@ -1,63 +1,16 @@
 ---
 import ProtectedApp from '../components/ProtectedApp';
 ---
-<html>
+<html lang="en">
   <head>
-    <style>
-      html, body {
-        margin: 0;
-        height: 100%;
-        font-family: sans-serif;
-      }
-      .chat-container {
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-      }
-      .chat-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.5rem 1rem;
-        border-bottom: 1px solid #e5e7eb;
-      }
-      .chat-header .logout {
-        padding: 0.25rem 0.5rem;
-        background: #ef4444;
-        color: #fff;
-        border: none;
-        border-radius: 0.25rem;
-        cursor: pointer;
-      }
-      .chat-messages {
-        flex: 1;
-        padding: 1rem;
-        overflow-y: auto;
-        background: #f9fafb;
-      }
-      .chat-message {
-        padding: 0.5rem 1rem;
-        background: #fff;
-        border-radius: 0.5rem;
-        margin-bottom: 0.5rem;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      }
-      .chat-input {
-        border-top: 1px solid #e5e7eb;
-        padding: 0.75rem 1rem;
-      }
-      .chat-input input {
-        width: 100%;
-        padding: 0.5rem;
-        border: 1px solid #d1d5db;
-        border-radius: 0.5rem;
-      }
-      .model-picker {
-        margin-right: 1rem;
-      }
-    </style>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAG Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   </head>
-  <body>
+  <body class="font-sans antialiased">
     <ProtectedApp client:load />
   </body>
 </html>

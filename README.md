@@ -147,6 +147,20 @@ Edit `.env` (see [Environment variables](#environment-variables)).
 
 ### 3) Run the stack
 
+**For Development (Recommended):**
+```bash
+# Start backend services
+docker compose up -d api vespa postgres indexer vespa-deploy
+
+# Start UI in development mode (separate terminal)
+cd ui && npm install && npm run dev
+
+# Verify everything works
+./scripts/wait_for_health.sh     # optional helper
+./scripts/smoke_tests.sh         # optional simple checks
+```
+
+**For Production/Testing:**
 ```bash
 docker compose up -d --build
 ./scripts/wait_for_health.sh     # optional helper
@@ -155,8 +169,8 @@ docker compose up -d --build
 
 The Vespa application will be **automatically deployed** when the stack starts. The `vespa-deploy` service waits for Vespa to be healthy and then deploys the application package.
 
-- UI: http://localhost:3000
-  - Login at http://localhost:3000/login (username/password from `.env`)
+- UI: http://localhost:4321 (development) or http://localhost:3000 (production)
+  - Login at `/login` (username/password from `.env`)
 - API health: http://localhost:8000/healthz
 - Vespa: http://localhost:19071/ApplicationStatus (example)
 
@@ -313,24 +327,53 @@ curl -b cookies.txt -X POST http://localhost:8080/chat   -H 'Content-Type: appli
 
 ## Development Workflow
 
-**After implementing any feature, always run:**
+### Quick Start (Recommended)
+
+For fast development with live reloading:
+
+1. **Start backend services (API, Vespa, Postgres, Indexer):**
+   ```bash
+   # Start all services except UI
+   docker compose up -d api vespa postgres indexer vespa-deploy
+   ```
+
+2. **Start UI in development mode:**
+   ```bash
+   cd ui && npm install && npm run dev
+   ```
+
+   The UI will be available at http://localhost:4321 with live reloading.
+
+3. **Verify everything is working:**
+   ```bash
+   ./scripts/wait_for_health.sh     # Wait for all services
+   ./scripts/smoke_tests.sh         # Test functionality
+   ```
+
+### Full Stack (Production-like)
+
+To run everything in containers:
 
 ```bash
-# Format and lint all code
-pre-commit run --all-files
-
-# Or run specific checks
-pre-commit run black prettier shfmt
-
-# Commit with properly formatted code
-git add .
-git commit -m "feat: your feature description"
+docker compose up -d --build
+./scripts/wait_for_health.sh     # optional helper
+./scripts/smoke_tests.sh         # optional simple checks
 ```
 
-**Required before pushing:**
-- All pre-commit hooks must pass
-- Tests should pass (if applicable)
-- Documentation updated for new features
+**Services:**
+- **UI**: http://localhost:3000 (containerized) or http://localhost:4321 (development)
+- **API**: http://localhost:8000
+- **Vespa**: http://localhost:19071
+- **Login**: username `admin`, password `password`
+
+### Code Quality (MANDATORY)
+
+**After implementing ANY feature, bug fix, or code change, you MUST run formatting and linting tools:**
+
+```bash
+# Always run before committing
+pre-commit run --all-files
+```
 
 ---
 
