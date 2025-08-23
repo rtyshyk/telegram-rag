@@ -1,3 +1,6 @@
 fastapi
 uvicorn
 psycopg2-binary
+bcrypt
+PyJWT
+pydantic-settings

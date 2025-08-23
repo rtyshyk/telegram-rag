@@ -42,6 +42,12 @@ services:
     build: ./api
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - APP_USER=${APP_USER}
+      - APP_USER_HASH_BCRYPT=${APP_USER_HASH_BCRYPT}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS}
+      - LOGIN_RATE_MAX_ATTEMPTS=${LOGIN_RATE_MAX_ATTEMPTS}
+      - LOGIN_RATE_WINDOW_SECONDS=${LOGIN_RATE_WINDOW_SECONDS}
     volumes:
       - telethon_session:/sessions
     depends_on:

@@ -156,6 +156,7 @@ docker compose up -d --build
 The Vespa application will be **automatically deployed** when the stack starts. The `vespa-deploy` service waits for Vespa to be healthy and then deploys the application package.
 
 - UI: http://localhost:3000
+  - Login at http://localhost:3000/login (username/password from `.env`)
 - API health: http://localhost:8000/healthz
 - Vespa: http://localhost:19071/ApplicationStatus (example)
 
@@ -187,6 +188,10 @@ TG_PHONE=+123456789
 # Auth for Web UI (FastAPI)
 APP_USER=admin
 APP_USER_HASH_BCRYPT=$2b$12$...     # bcrypt of your password (see below)
+SESSION_SECRET=<random-hex>
+SESSION_TTL_HOURS=24
+LOGIN_RATE_MAX_ATTEMPTS=5
+LOGIN_RATE_WINDOW_SECONDS=900
 
 # Postgres
 POSTGRES_HOST=postgres
