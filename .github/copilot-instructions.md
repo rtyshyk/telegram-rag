@@ -17,8 +17,19 @@ pre-commit run --all-files
    pre-commit run --all-files
    ```
 3. **Verify all hooks pass** - no exceptions
-4. **Run relevant tests** if applicable
+4. **Run relevant tests** (MANDATORY) - use VS Code tools, not terminal commands
 5. **Commit with proper formatting**
+
+## Testing Requirements
+
+### Always Use VS Code Testing Tools
+
+**MANDATORY: Use VS Code built-in testing tools instead of terminal commands:**
+
+- **For Python tests**: Use `runTests` tool with specific file paths
+- **For JavaScript/TypeScript tests**: Use VS Code test runner integration
+- **Never use terminal commands** like `pytest`, `npm test`, `vitest` directly
+- **Always verify tests pass** before committing changes
 
 ## Code Standards
 
@@ -67,8 +78,10 @@ pre-commit run --all-files
 
 - Pre-commit hook execution
 - Code formatting
+- **Running tests with VS Code tools** (not terminal commands)
 - Documentation updates for new features
 - Health check implementations
 - Proper error handling
 
 Remember: **Quality code is formatted code. Always run pre-commit hooks after any changes!**
+Remember: **Reliable code is tested code. Always use VS Code testing tools to verify functionality!**
