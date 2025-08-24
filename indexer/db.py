@@ -17,6 +17,7 @@ from types import SimpleNamespace
 try:  # pragma: no cover - exercised implicitly
     import asyncpg  # type: ignore
 except Exception:  # ImportError or build-time failure
+
     class _StubConnection:  # pragma: no cover - trivial
         async def execute(self, *args: Any, **kwargs: Any):  # noqa: D401
             return "OK"
@@ -54,34 +55,31 @@ class DatabaseManager:
         self.database_url = database_url
         # Using Any to allow fallback stub namespace when asyncpg isn't installed
         self.pool: Optional[Any] = None
-    
+
     async def initialize(self):
         """Initialize database pool and create tables."""
         self.pool = await asyncpg.create_pool(
-            self.database_url,
-            min_size=2,
-            max_size=10,
-            command_timeout=60
+            self.database_url, min_size=2, max_size=10, command_timeout=60
         )
         await self.create_tables()
-    
+
     async def close(self):
         """Close database pool."""
         if self.pool:
             await self.pool.close()
-    
+
     @asynccontextmanager
     async def get_connection(self):
         """Get database connection from pool."""
         if not self.pool:
             raise RuntimeError("Database not initialized")
-        
+
         conn = await self.pool.acquire()
         try:
             yield conn
         finally:
             await self.pool.release(conn)
-    
+
     async def create_tables(self):
         """Create required tables."""
         sql = """
@@ -125,23 +123,23 @@ class DatabaseManager:
         CREATE INDEX IF NOT EXISTS idx_chunks_chat_msg ON chunks(chat_id, message_id);
         CREATE INDEX IF NOT EXISTS idx_chunks_texthash ON chunks(text_hash);
         """
-        
+
         async with self.get_connection() as conn:
             await conn.execute(sql)
-        
+
         logger.info("Database tables created/verified")
-    
+
     async def get_sync_state(self, chat_id: str) -> Optional[TgSyncState]:
         """Get sync state for a chat."""
         async with self.get_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT chat_id, last_message_id, last_edit_ts FROM tg_sync_state WHERE chat_id = $1",
-                chat_id
+                chat_id,
             )
             if row:
                 return TgSyncState(**dict(row))
             return None
-    
+
     async def update_sync_state(self, state: TgSyncState):
         """Update sync state for a chat."""
         async with self.get_connection() as conn:
@@ -154,9 +152,11 @@ class DatabaseManager:
                     last_edit_ts = EXCLUDED.last_edit_ts,
                     updated_at = now()
                 """,
-                state.chat_id, state.last_message_id, state.last_edit_ts
+                state.chat_id,
+                state.last_message_id,
+                state.last_edit_ts,
             )
-    
+
     async def get_cached_embedding(self, text_hash: str) -> Optional[EmbeddingCache]:
         """Get cached embedding by text hash."""
         async with self.get_connection() as conn:
@@ -165,12 +165,12 @@ class DatabaseManager:
                 SELECT text_hash, model, dim, vector, lang, chunking_version, preprocess_version
                 FROM embedding_cache WHERE text_hash = $1
                 """,
-                text_hash
+                text_hash,
             )
             if row:
                 return EmbeddingCache(**dict(row))
             return None
-    
+
     async def cache_embedding(self, embedding: EmbeddingCache):
         """Cache an embedding."""
         async with self.get_connection() as conn:
@@ -180,10 +180,15 @@ class DatabaseManager:
                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
                 ON CONFLICT (text_hash) DO NOTHING
                 """,
-                embedding.text_hash, embedding.model, embedding.dim, embedding.vector,
-                embedding.lang, embedding.chunking_version, embedding.preprocess_version
+                embedding.text_hash,
+                embedding.model,
+                embedding.dim,
+                embedding.vector,
+                embedding.lang,
+                embedding.chunking_version,
+                embedding.preprocess_version,
             )
-    
+
     async def get_existing_chunks(self, chat_id: str, message_id: int) -> List[Chunk]:
         """Get existing chunks for a message."""
         async with self.get_connection() as conn:
@@ -193,10 +198,11 @@ class DatabaseManager:
                        edit_date, deleted_at, sender, sender_username, chat_type, thread_id, has_link
                 FROM chunks WHERE chat_id = $1 AND message_id = $2
                 """,
-                chat_id, message_id
+                chat_id,
+                message_id,
             )
             return [Chunk(**dict(row)) for row in rows]
-    
+
     async def upsert_chunk(self, chunk: Chunk):
         """Insert or update a chunk."""
         async with self.get_connection() as conn:
@@ -216,15 +222,27 @@ class DatabaseManager:
                     thread_id = EXCLUDED.thread_id,
                     has_link = EXCLUDED.has_link
                 """,
-                chunk.chunk_id, chunk.chat_id, chunk.message_id, chunk.chunk_idx,
-                chunk.text_hash, chunk.message_date, chunk.edit_date, chunk.deleted_at,
-                chunk.sender, chunk.sender_username, chunk.chat_type, chunk.thread_id, chunk.has_link
+                chunk.chunk_id,
+                chunk.chat_id,
+                chunk.message_id,
+                chunk.chunk_idx,
+                chunk.text_hash,
+                chunk.message_date,
+                chunk.edit_date,
+                chunk.deleted_at,
+                chunk.sender,
+                chunk.sender_username,
+                chunk.chat_type,
+                chunk.thread_id,
+                chunk.has_link,
             )
-    
+
     async def mark_chunks_deleted(self, chat_id: str, message_id: int, deleted_at: int):
         """Mark all chunks for a message as deleted."""
         async with self.get_connection() as conn:
             await conn.execute(
                 "UPDATE chunks SET deleted_at = $3 WHERE chat_id = $1 AND message_id = $2",
-                chat_id, message_id, deleted_at
+                chat_id,
+                message_id,
+                deleted_at,
             )

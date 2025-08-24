@@ -5,6 +5,7 @@ from datetime import datetime
 from unittest.mock import MagicMock
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from normalize import (
@@ -12,7 +13,7 @@ from normalize import (
     create_header,
     compose_message_with_reply,
     extract_chat_type,
-    format_sender_name
+    format_sender_name,
 )
 
 
@@ -38,6 +39,7 @@ class TestNormalizeText:
         """Test normalizing text with HTTP link."""
         input_text = "Check out http://example.com for more info."
         text, bm25_text, has_link = normalize_text(input_text)
+
     assert text == input_text  # Original text preserved
     assert bm25_text == input_text
     assert has_link is True
@@ -46,6 +48,7 @@ class TestNormalizeText:
         """Test normalizing text with HTTPS link."""
         input_text = "Visit https://secure-site.com/path?query=value"
         text, bm25_text, has_link = normalize_text(input_text)
+
     assert text == input_text
     assert bm25_text == input_text
     assert has_link is True
@@ -54,6 +57,7 @@ class TestNormalizeText:
         """Test normalizing text with multiple links."""
         input_text = "First http://site1.com and second https://site2.com links."
         text, bm25_text, has_link = normalize_text(input_text)
+
     assert text == input_text
     assert bm25_text == input_text
     assert has_link is True
@@ -63,6 +67,7 @@ class TestNormalizeText:
         input_text = "Visit HTTP://EXAMPLE.COM and HTTPS://TEST.COM"
         text, bm25_text, has_link = normalize_text(input_text)
         assert has_link is True
+
     assert "HTTP://EXAMPLE.COM" in bm25_text
 
     def test_normalize_whitespace_cleanup(self):
@@ -78,14 +83,18 @@ class TestNormalizeText:
         input_text = "Check   http://example.com   for    info"
         text, bm25_text, has_link = normalize_text(input_text)
         assert text == "Check http://example.com for info"
+
     assert bm25_text == "Check http://example.com for info"
     assert has_link is True
 
     def test_normalize_complex_urls(self):
         """Test normalization with complex URLs."""
-        input_text = "Link: https://example.com/path/to/page?param1=value1&param2=value2#section"
+        input_text = (
+            "Link: https://example.com/path/to/page?param1=value1&param2=value2#section"
+        )
         text, bm25_text, has_link = normalize_text(input_text)
         assert has_link is True
+
     assert bm25_text == input_text
 
 
@@ -125,9 +134,9 @@ class TestCreateHeader:
         timestamps = [
             int(datetime(2025, 1, 1, 0, 0, 0).timestamp()),
             int(datetime(2025, 12, 31, 23, 59, 59).timestamp()),
-            int(datetime(2025, 6, 15, 12, 30, 0).timestamp())
+            int(datetime(2025, 6, 15, 12, 30, 0).timestamp()),
         ]
-        
+
         for timestamp in timestamps:
             header = create_header("Test", "test", timestamp)
             assert "@test" in header  # Username is used when present
@@ -163,9 +172,9 @@ class TestComposeMessageWithReply:
         """Test that reply truncation happens at word boundaries."""
         main_text = "Main message."
         reply_text = "Word1 Word2 Word3 Word4 Word5 Word6 Word7 Word8"
-        
+
         result = compose_message_with_reply(main_text, reply_text, max_reply_tokens=5)
-        
+
         # Should preserve word boundaries in truncation
         assert "Word1" in result
         assert "Main message" in result
@@ -200,7 +209,7 @@ class TestExtractChatType:
         chat.megagroup = False
         chat.channel = True
         chat.user_id = None
-        
+
         chat_type = extract_chat_type(chat)
         assert chat_type == "channel"
 
@@ -210,7 +219,7 @@ class TestExtractChatType:
         chat.megagroup = False
         chat.channel = False
         chat.user_id = 12345
-        
+
         chat_type = extract_chat_type(chat)
         assert chat_type == "private"
 
@@ -233,6 +242,8 @@ class TestExtractChatType:
 
         chat_type = extract_chat_type(chat)
         assert chat_type == "unknown"  # Default fallback
+
+
 class TestFormatSenderName:
     """Test format_sender_name function."""
 
@@ -264,7 +275,7 @@ class TestFormatSenderName:
         sender.first_name = None
         sender.last_name = None
         sender.username = "johndoe"
-        
+
         full_name, username = format_sender_name(sender)
         assert full_name is None
         assert username == "johndoe"
@@ -275,7 +286,7 @@ class TestFormatSenderName:
         sender.first_name = "John"
         sender.last_name = "Doe"
         sender.username = None
-        
+
         full_name, username = format_sender_name(sender)
         assert full_name == "John Doe"
         assert username is None
@@ -292,7 +303,7 @@ class TestFormatSenderName:
         del sender.first_name
         del sender.last_name
         del sender.username
-        
+
         full_name, username = format_sender_name(sender)
         assert full_name is None
         assert username is None
@@ -303,7 +314,7 @@ class TestFormatSenderName:
         sender.first_name = ""
         sender.last_name = ""
         sender.username = ""
-        
+
         full_name, username = format_sender_name(sender)
         assert full_name is None
         assert username is None

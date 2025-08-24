@@ -4,15 +4,10 @@ import pytest
 from datetime import datetime
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import (
-    TgSyncState,
-    EmbeddingCache,
-    Chunk,
-    VespaDocument,
-    IndexerMetrics
-)
+from models import TgSyncState, EmbeddingCache, Chunk, VespaDocument, IndexerMetrics
 
 
 class TestTgSyncState:
@@ -27,27 +22,19 @@ class TestTgSyncState:
 
     def test_create_full_state(self):
         """Test creating full sync state."""
-        state = TgSyncState(
-            chat_id="123",
-            last_message_id=456,
-            last_edit_ts=1692825600
-        )
+        state = TgSyncState(chat_id="123", last_message_id=456, last_edit_ts=1692825600)
         assert state.chat_id == "123"
         assert state.last_message_id == 456
         assert state.last_edit_ts == 1692825600
 
     def test_state_serialization(self):
         """Test state can be serialized/deserialized."""
-        state = TgSyncState(
-            chat_id="123",
-            last_message_id=456,
-            last_edit_ts=1692825600
-        )
-        
+        state = TgSyncState(chat_id="123", last_message_id=456, last_edit_ts=1692825600)
+
         # Test dict conversion
         state_dict = state.model_dump()
         restored = TgSyncState(**state_dict)
-        
+
         assert restored.chat_id == state.chat_id
         assert restored.last_message_id == state.last_message_id
         assert restored.last_edit_ts == state.last_edit_ts
@@ -58,16 +45,16 @@ class TestEmbeddingCache:
 
     def test_create_cache_entry(self):
         """Test creating cache entry."""
-        vector_bytes = b'\x00\x01\x02\x03'
+        vector_bytes = b"\x00\x01\x02\x03"
         cache = EmbeddingCache(
             text_hash="abc123",
             model="text-embedding-3-small",
             dim=1536,
             vector=vector_bytes,
             chunking_version=1,
-            preprocess_version=1
+            preprocess_version=1,
         )
-        
+
         assert cache.text_hash == "abc123"
         assert cache.model == "text-embedding-3-small"
         assert cache.dim == 1536
@@ -82,12 +69,12 @@ class TestEmbeddingCache:
             text_hash="abc123",
             model="text-embedding-3-small",
             dim=1536,
-            vector=b'\x00\x01',
+            vector=b"\x00\x01",
             lang="en",
             chunking_version=1,
-            preprocess_version=1
+            preprocess_version=1,
         )
-        
+
         assert cache.lang == "en"
 
 
@@ -102,9 +89,9 @@ class TestChunk:
             message_id=456,
             chunk_idx=0,
             text_hash="abc123",
-            message_date=1692825600
+            message_date=1692825600,
         )
-        
+
         assert chunk.chunk_id == "chat123:msg456:0"
         assert chunk.chat_id == "123"
         assert chunk.message_id == 456
@@ -130,9 +117,9 @@ class TestChunk:
             sender_username="@testuser",
             chat_type="private",
             thread_id=789,
-            has_link=True
+            has_link=True,
         )
-        
+
         assert chunk.edit_date == 1692825700
         assert chunk.sender == "TestUser"
         assert chunk.sender_username == "@testuser"
@@ -154,9 +141,9 @@ class TestVespaDocument:
             message_date=1692825600,
             text="Hello world",
             bm25_text="Hello world",
-            vector={"values": [0.1, 0.2, 0.3]}
+            vector={"values": [0.1, 0.2, 0.3]},
         )
-        
+
         assert doc.id == "doc123"
         assert doc.chat_id == "123"
         assert doc.message_id == 456
@@ -184,9 +171,9 @@ class TestVespaDocument:
             has_link=True,
             text="Hello world with link https://example.com",
             bm25_text="Hello world with link https://example.com",
-            vector={"values": [0.1, 0.2, 0.3]}
+            vector={"values": [0.1, 0.2, 0.3]},
         )
-        
+
         assert doc.source_title == "Test Chat"
         assert doc.sender == "TestUser"
         assert doc.sender_username == "@testuser"
@@ -202,7 +189,7 @@ class TestIndexerMetrics:
     def test_create_empty_metrics(self):
         """Test creating empty metrics."""
         metrics = IndexerMetrics()
-        
+
         assert metrics.messages_scanned == 0
         assert metrics.messages_indexed == 0
         assert metrics.chunks_written == 0
@@ -218,7 +205,7 @@ class TestIndexerMetrics:
     def test_metrics_accumulation(self):
         """Test metrics can be updated."""
         metrics = IndexerMetrics()
-        
+
         # Simulate processing
         metrics.messages_scanned = 10
         metrics.messages_indexed = 8
@@ -227,7 +214,7 @@ class TestIndexerMetrics:
         metrics.vespa_feed_success = 12
         metrics.total_tokens = 1500
         metrics.cost_estimate = 0.0003
-        
+
         assert metrics.messages_scanned == 10
         assert metrics.messages_indexed == 8
         assert metrics.chunks_written == 12
@@ -242,13 +229,13 @@ class TestIndexerMetrics:
             messages_scanned=10,
             messages_indexed=8,
             total_tokens=1500,
-            cost_estimate=0.0003
+            cost_estimate=0.0003,
         )
-        
+
         # Test dict conversion
         metrics_dict = metrics.model_dump()
         restored = IndexerMetrics(**metrics_dict)
-        
+
         assert restored.messages_scanned == metrics.messages_scanned
         assert restored.messages_indexed == metrics.messages_indexed
         assert restored.total_tokens == metrics.total_tokens
