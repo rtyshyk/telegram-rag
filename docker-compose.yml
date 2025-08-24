@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:15-alpine
+    env_file: .env
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -53,6 +54,7 @@ services:
 
   api:
     build: ./api
+    env_file: .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - APP_USER=${APP_USER}
@@ -84,6 +86,7 @@ services:
 
   ui:
     build: ./ui
+    env_file: .env
     environment:
       - PUBLIC_API_URL=${PUBLIC_API_URL}
       - PUBLIC_VESPA_URL=${PUBLIC_VESPA_URL}
@@ -105,6 +108,7 @@ services:
 
   indexer:
     build: ./indexer
+    env_file: .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - VESPA_ENDPOINT=http://vespa:8080

@@ -184,54 +184,6 @@ This runs a one-shot sync. The **daemon** runs continuously to pick up edits/del
 
 ---
 
-## Environment variables
-
-Minimal set:
-
-```ini
-OPENAI_API_KEY=sk-...
-
-# Optional rerank (Cohere)
-COHERE_API_KEY=
-
-# Telegram user auth (Telethon)
-TG_API_ID=123456
-TG_API_HASH=abcdef1234567890abcdef12
-TG_PHONE=+123456789
-
-# Auth for Web UI (FastAPI)
-APP_USER=admin
-APP_USER_HASH_BCRYPT=$2b$12$...     # bcrypt of your password (see below)
-SESSION_SECRET=<random-hex>
-SESSION_TTL_HOURS=24
-LOGIN_RATE_MAX_ATTEMPTS=5
-LOGIN_RATE_WINDOW_SECONDS=900
-
-# Postgres
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
-POSTGRES_DB=telegram_rag
-POSTGRES_USER=rag
-POSTGRES_PASSWORD=ragpass
-
-# Vespa
-VESPA_ENDPOINT=http://vespa:8080
-
-# Indexing / ranking
-EMBED_MODEL=text-embedding-3-large
-CHUNKING_VERSION=1
-PREPROCESS_VERSION=1
-RECENCY_HALFLIFE_DAYS=90
-RERANK_ENABLED=true                 # ignored if COHERE_API_KEY missing
-DAILY_EMBED_BUDGET_USD=0            # 0 disables budget guard
-
-# GitHub MCP Integration (optional)
-GITHUB_PERSONAL_ACCESS_TOKEN=ghp_... # GitHub personal access token for MCP
-
-# Logging
-LOG_LEVEL=INFO
-```
-
 **Generate bcrypt hash** (example):
 
 ```bash
@@ -239,58 +191,6 @@ python - <<'PY'
 import bcrypt; print(bcrypt.hashpw(b"your-password", bcrypt.gensalt()).decode())
 PY
 ```
-
----
-
-## GitHub MCP Integration
-
-This project includes GitHub Model Context Protocol (MCP) integration for enhanced development workflows and repository management.
-
-### Setup
-
-1. **Generate a GitHub Personal Access Token:**
-   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-   - Generate a new token with the following scopes:
-     - `repo` (for repository access)
-     - `read:org` (for organization access)
-     - `read:user` (for user profile access)
-     - `workflow` (for GitHub Actions access, if needed)
-
-2. **Configure the token:**
-   ```bash
-   # Add to your .env file
-   GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_personal_access_token_here
-   ```
-
-3. **MCP Configuration:**
-   The `mcp-config.json` file is already configured to use the GitHub MCP server. It will automatically use your token from the environment variable.
-
-### Available Features
-
-With GitHub MCP integration, you can:
-
-- **Repository Management**: Create, clone, and manage repositories
-- **Issue Tracking**: Create, update, and search GitHub issues
-- **Pull Requests**: Create and manage pull requests
-- **File Operations**: Read, create, and update files in repositories
-- **Branch Management**: Create and switch between branches
-- **GitHub Actions**: Monitor and manage workflow runs
-- **Release Management**: Create and manage releases
-
-### Usage with AI Assistants
-
-When using AI assistants (like GitHub Copilot or Claude), the MCP integration allows them to:
-- Access your GitHub repositories and understand the project structure
-- Help with code reviews and pull request management
-- Automate issue creation and tracking
-- Assist with release planning and deployment workflows
-
-### Security Notes
-
-- Keep your GitHub token secure and never commit it to version control
-- Use the principle of least privilege when setting token scopes
-- Regularly rotate your personal access tokens
-- Consider using fine-grained personal access tokens for better security
 
 ---
 
