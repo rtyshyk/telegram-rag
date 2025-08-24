@@ -1,5 +1,7 @@
 # GitHub Copilot Instructions
 
+Repository: https://github.com/rtyshyk/telegram-rag
+
 ## Code Quality Requirements
 
 **MANDATORY: After implementing ANY feature, bug fix, or code change, you MUST run formatting and linting tools:**
