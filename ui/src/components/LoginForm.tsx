@@ -50,7 +50,7 @@ export default function LoginForm() {
             </svg>
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            Sign in to Chat
+            Sign in to RAG Chat
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Access your intelligent assistant

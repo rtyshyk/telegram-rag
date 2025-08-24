@@ -7,14 +7,64 @@ schema message {
       indexing: index | summary
       index: enable-bm25
     }
+    field bm25_text type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+    field vector type tensor<float>(x[3072]) {
+      indexing: attribute | summary
+    }
     field chat_id type string {
+      indexing: attribute | summary
+    }
+    field message_id type long {
+      indexing: attribute | summary
+    }
+    field chunk_idx type int {
+      indexing: attribute | summary
+    }
+    field source_title type string {
+      indexing: attribute | summary
+    }
+    field sender type string {
+      indexing: attribute | summary
+    }
+    field sender_username type string {
+      indexing: attribute | summary
+    }
+    field chat_type type string {
+      indexing: attribute | summary
+    }
+    field message_date type long {
+      indexing: attribute | summary
+    }
+    field edit_date type long {
+      indexing: attribute | summary
+    }
+    field thread_id type long {
+      indexing: attribute | summary
+    }
+    field has_link type bool {
       indexing: attribute | summary
     }
     field date type int {
       indexing: attribute | summary
     }
   }
-  fieldset default { fields: text }
-  # Use implicit default summary; explicit definitions removed to avoid conflicts
-  rank-profile default { first-phase { expression: bm25(text) } }
+  
+  fieldset default { 
+    fields: text, bm25_text 
+  }
+  
+  rank-profile default {
+    first-phase {
+      expression: bm25(text) + bm25(bm25_text)
+    }
+  }
+  
+  rank-profile hybrid {
+    first-phase {
+      expression: 1.6 * closeness(field, vector) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
+    }
+  }
 }

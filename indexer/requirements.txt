@@ -1,0 +1,12 @@
+telethon==1.36.0
+# asyncpg wheels not yet available for early Python 3.13 builds; skip install under 3.13+
+asyncpg==0.29.0; python_version < '3.13'
+openai==1.52.0
+tiktoken==0.8.0
+httpx==0.27.2
+pydantic==2.9.2
+pydantic-settings==2.5.2
+alembic==1.13.3
+# Mark psycopg2-binary optional for Python < 3.13 to avoid build from source in CI
+psycopg2-binary==2.9.9; python_version < '3.13'
+python-dotenv==1.0.1
