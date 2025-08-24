@@ -1,0 +1,20 @@
+FROM alpine:3.19
+
+# Install dependencies
+RUN apk add --no-cache \
+    curl \
+    zip \
+    jq \
+    bash
+
+# Copy deployment script
+COPY scripts/deploy-vespa.sh /usr/local/bin/deploy-vespa.sh
+RUN chmod +x /usr/local/bin/deploy-vespa.sh
+
+# Copy Vespa application
+COPY vespa/application /app/application
+
+WORKDIR /app
+
+# Default command
+CMD ["/usr/local/bin/deploy-vespa.sh", "vespa", "19071", "/app/application"]
