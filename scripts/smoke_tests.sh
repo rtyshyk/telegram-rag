@@ -21,7 +21,7 @@ curl -fsS http://localhost:19071/ApplicationStatus >/dev/null
 
 # Test authentication
 curl -fsS -c cookies.txt -H 'Content-Type: application/json' \
-	-d '{"username":"'"${APP_USER}"'","password":"password"}' \
+	-d '{"username":"admin","password":"password"}' \
 	http://localhost:8000/auth/login | grep -q '"ok": true'
 
 # Test models endpoint
