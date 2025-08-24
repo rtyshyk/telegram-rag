@@ -22,7 +22,7 @@ curl -fsS http://localhost:19071/ApplicationStatus >/dev/null
 # Test authentication
 curl -fsS -c cookies.txt -H 'Content-Type: application/json' \
 	-d '{"username":"admin","password":"password"}' \
-	http://localhost:8000/auth/login | grep -q '"ok": true'
+	http://localhost:8000/auth/login | grep -q '"ok":true'
 
 # Test models endpoint
 curl -fsS -b cookies.txt http://localhost:8000/models | grep -q 'gpt-5'
