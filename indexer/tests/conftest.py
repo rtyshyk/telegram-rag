@@ -48,14 +48,14 @@ def mock_db():
 def mock_openai_client():
     """Mock OpenAI client for testing."""
     client = AsyncMock()
-    
+
     # Mock embeddings response
     mock_embedding_data = MagicMock()
     mock_embedding_data.embedding = [0.1, 0.2, 0.3] * 1024  # 3072 dimensions
-    
+
     mock_response = MagicMock()
     mock_response.data = [mock_embedding_data]
-    
+
     client.embeddings.create.return_value = mock_response
     return client
 
@@ -64,17 +64,17 @@ def mock_openai_client():
 def mock_vespa_client():
     """Mock Vespa HTTP client for testing."""
     client = AsyncMock()
-    
+
     # Mock successful responses by default
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.text = "OK"
-    
+
     client.post.return_value = mock_response
     client.delete.return_value = mock_response
     client.get.return_value = mock_response
     client.aclose.return_value = None
-    
+
     return client
 
 
@@ -82,7 +82,7 @@ def mock_vespa_client():
 def sample_vespa_document():
     """Sample VespaDocument for testing."""
     from indexer.models import VespaDocument
-    
+
     return VespaDocument(
         id="test:123:0:v1",
         chat_id="test_chat",
@@ -98,7 +98,7 @@ def sample_vespa_document():
         has_link=False,
         text="This is a test message for unit testing purposes.",
         bm25_text="This is a test message for unit testing purposes.",
-        vector={"values": [0.1, 0.2, 0.3]}
+        vector={"values": [0.1, 0.2, 0.3]},
     )
 
 
@@ -107,10 +107,10 @@ def sample_embedding_cache():
     """Sample EmbeddingCache for testing."""
     from indexer.models import EmbeddingCache
     import struct
-    
+
     vector = [0.1, 0.2, 0.3]
-    vector_bytes = struct.pack(f'{len(vector)}f', *vector)
-    
+    vector_bytes = struct.pack(f"{len(vector)}f", *vector)
+
     return EmbeddingCache(
         text_hash="abc123def456",
         model="text-embedding-3-small",
@@ -118,7 +118,7 @@ def sample_embedding_cache():
         vector=vector_bytes,
         lang="en",
         chunking_version=1,
-        preprocess_version=1
+        preprocess_version=1,
     )
 
 
@@ -126,7 +126,7 @@ def sample_embedding_cache():
 def sample_chunk():
     """Sample Chunk for testing."""
     from indexer.models import Chunk
-    
+
     return Chunk(
         chunk_id="test:123:0",
         chat_id="test_chat",
@@ -139,7 +139,7 @@ def sample_chunk():
         sender_username="testuser",
         chat_type="private",
         thread_id=None,
-        has_link=False
+        has_link=False,
     )
 
 
@@ -159,16 +159,16 @@ def clean_environment():
         "OPENAI_API_KEY",
         "OPENAI_STUB",
         "VESPA_ENDPOINT",
-        "DATABASE_URL"
+        "DATABASE_URL",
     ]
-    
+
     for var in env_vars_to_clean:
         if var in os.environ:
             original_env[var] = os.environ[var]
             del os.environ[var]
-    
+
     yield
-    
+
     # Restore original values
     for var, value in original_env.items():
         os.environ[var] = value
@@ -186,14 +186,14 @@ def mock_telethon_message():
     message.raw_text = "This is a test message"
     message.reply_to = None
     message.forward = None
-    
+
     # Mock sender
     sender = MagicMock()
     sender.first_name = "Test"
     sender.last_name = "User"
     sender.username = "testuser"
     message.sender = sender
-    
+
     return message
 
 
@@ -211,13 +211,13 @@ def mock_telethon_chat():
 
 class AsyncIterator:
     """Helper class for async iteration in tests."""
-    
+
     def __init__(self, items):
         self.items = iter(items)
-    
+
     def __aiter__(self):
         return self
-    
+
     async def __anext__(self):
         try:
             return next(self.items)

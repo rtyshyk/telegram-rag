@@ -5,6 +5,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from embedder import Embedder
@@ -27,12 +28,13 @@ class TestEmbedder:
         assert self.embedder.batch_size > 0
         assert self.embedder.concurrency > 0
         assert isinstance(self.embedder.metrics, IndexerMetrics)
+
     def test_compute_text_hash(self):
         """Test text hash computation."""
         text = "Hello world"
         hash1 = self.embedder._compute_text_hash(text)
         hash2 = self.embedder._compute_text_hash(text)
-        
+
         # Same text should produce same hash
         assert hash1 == hash2
         assert isinstance(hash1, str)
@@ -50,11 +52,11 @@ class TestEmbedder:
     def test_vector_serialization(self):
         """Test vector to bytes conversion."""
         vector = [0.1, 0.2, -0.3, 0.4]
-        
+
         # Convert to bytes and back
         vector_bytes = self.embedder._vector_to_bytes(vector)
         restored_vector = self.embedder._bytes_to_vector(vector_bytes)
-        
+
         # Should be approximately equal (float precision)
         assert len(restored_vector) == len(vector)
         for i in range(len(vector)):
@@ -63,15 +65,15 @@ class TestEmbedder:
     def test_generate_stub_vector(self):
         """Test deterministic stub vector generation."""
         text_hash = "abc123def456"
-        
+
         # Generate vector
         vector1 = self.embedder._generate_stub_vector(text_hash)
         vector2 = self.embedder._generate_stub_vector(text_hash)
-        
+
         # Should be deterministic
         assert vector1 == vector2
         assert len(vector1) == 3072  # Default dimension
-        
+
         # Should be normalized
         magnitude = sum(x * x for x in vector1) ** 0.5
         assert abs(magnitude - 1.0) < 1e-6
@@ -94,13 +96,13 @@ class TestEmbedder:
     async def test_embed_texts_all_cached(self):
         """Test embedding when all texts are cached."""
         texts = ["Hello world", "Test message"]
-        
+
         # Mock cached embeddings
         cached_vectors = [[0.1, 0.2], [0.3, 0.4]]
 
         # Pre-compute hashes for provided texts
         hash_map = {t: self.embedder._compute_text_hash(t) for t in texts}
-        
+
         async def mock_get_cached(text_hash):
             if text_hash == hash_map[texts[0]]:
                 return EmbeddingCache(
@@ -109,7 +111,7 @@ class TestEmbedder:
                     dim=2,
                     vector=self.embedder._vector_to_bytes(cached_vectors[0]),
                     chunking_version=1,
-                    preprocess_version=1
+                    preprocess_version=1,
                 )
             if text_hash == hash_map[texts[1]]:
                 return EmbeddingCache(
@@ -118,14 +120,14 @@ class TestEmbedder:
                     dim=2,
                     vector=self.embedder._vector_to_bytes(cached_vectors[1]),
                     chunking_version=1,
-                    preprocess_version=1
+                    preprocess_version=1,
                 )
             return None
-        
+
         self.mock_db.get_cached_embedding.side_effect = mock_get_cached
-        
+
         results = await self.embedder.embed_texts(texts)
-        
+
         assert len(results) == 2
         assert self.embedder.metrics.embed_cached_hits == 2
         assert self.embedder.metrics.embed_cached_misses == 0
@@ -134,26 +136,35 @@ class TestEmbedder:
     async def test_embed_texts_no_cache(self):
         """Test embedding when no texts are cached."""
         texts = ["Hello world", "Test message"]
-        
+
         # Mock no cached embeddings
         self.mock_db.get_cached_embedding.return_value = None
-        
+
         # Mock API response
         # Patch specific attributes rather than replacing whole settings object
         from settings import settings as real_settings
-        original = (real_settings.openai_stub, real_settings.daily_embed_budget_usd,
-                    real_settings.chunking_version, real_settings.preprocess_version)
+
+        original = (
+            real_settings.openai_stub,
+            real_settings.daily_embed_budget_usd,
+            real_settings.chunking_version,
+            real_settings.preprocess_version,
+        )
         real_settings.openai_stub = True
         real_settings.daily_embed_budget_usd = 10.0
         real_settings.chunking_version = 1
         real_settings.preprocess_version = 1
-            
+
         try:
             results = await self.embedder.embed_texts(texts)
         finally:
-            (real_settings.openai_stub, real_settings.daily_embed_budget_usd,
-             real_settings.chunking_version, real_settings.preprocess_version) = original
-        
+            (
+                real_settings.openai_stub,
+                real_settings.daily_embed_budget_usd,
+                real_settings.chunking_version,
+                real_settings.preprocess_version,
+            ) = original
+
         assert len(results) == 2
         assert self.embedder.metrics.embed_cached_hits == 0
         assert self.embedder.metrics.embed_cached_misses == 2
@@ -164,12 +175,12 @@ class TestEmbedder:
     async def test_embed_texts_dry_run(self):
         """Test embedding in dry run mode."""
         texts = ["Hello world", "Test message"]
-        
+
         # Mock no cached embeddings
         self.mock_db.get_cached_embedding.return_value = None
-        
+
         results = await self.embedder.embed_texts(texts, dry_run=True)
-        
+
         # Should only return cached results (none in this case)
         assert len(results) == 0
         assert self.embedder.metrics.total_tokens > 0  # Cost still estimated
@@ -184,6 +195,7 @@ class TestEmbedder:
         self.mock_db.get_cached_embedding.return_value = None
 
         from settings import settings as real_settings
+
         original = (real_settings.openai_stub, real_settings.daily_embed_budget_usd)
         # Keep stub mode (no network) so we can calculate cost, then set budget just below estimated cost
         real_settings.openai_stub = True
@@ -209,8 +221,9 @@ class TestEmbedder:
         """Test batch embedding in stub mode."""
         batch = [("Hello world", "hash1"), ("Test message", "hash2")]
         semaphore = asyncio.Semaphore(1)
-        
+
         from settings import settings as real_settings
+
         original = real_settings.openai_stub
         real_settings.openai_stub = True
         try:
@@ -228,20 +241,22 @@ class TestEmbedder:
         """Test API retry logic."""
         batch = [("Hello world", "hash1")]
         semaphore = asyncio.Semaphore(1)
-        
+
         # Mock client that fails twice then succeeds
         mock_response = MagicMock()
         mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
-        
+
         call_count = 0
+
         async def mock_create(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
                 raise Exception("API Error")
             return mock_response
-        
+
         from settings import settings as real_settings
+
         original = (real_settings.openai_stub, real_settings.backoff_base_ms)
         real_settings.openai_stub = False
         real_settings.backoff_base_ms = 10
@@ -258,12 +273,13 @@ class TestEmbedder:
         """Test API failure after all retries."""
         batch = [("Hello world", "hash1")]
         semaphore = asyncio.Semaphore(1)
-        
+
         # Mock client that always fails
         async def mock_create(*args, **kwargs):
             raise Exception("Persistent API Error")
-        
+
         from settings import settings as real_settings
+
         original = (real_settings.openai_stub, real_settings.backoff_base_ms)
         real_settings.openai_stub = False
         real_settings.backoff_base_ms = 1
@@ -281,7 +297,12 @@ class TestEmbedder:
         self.mock_db.get_cached_embedding.return_value = None
 
         from settings import settings as real_settings
-        original = (real_settings.openai_stub, real_settings.chunking_version, real_settings.preprocess_version)
+
+        original = (
+            real_settings.openai_stub,
+            real_settings.chunking_version,
+            real_settings.preprocess_version,
+        )
         try:
             real_settings.openai_stub = True
             real_settings.chunking_version = 1
@@ -290,7 +311,11 @@ class TestEmbedder:
             expected_hash = self.embedder._compute_text_hash(texts[0])
             await self.embedder.embed_texts(texts)
         finally:
-            (real_settings.openai_stub, real_settings.chunking_version, real_settings.preprocess_version) = original
+            (
+                real_settings.openai_stub,
+                real_settings.chunking_version,
+                real_settings.preprocess_version,
+            ) = original
         # Check that cache_embedding was called
         self.mock_db.cache_embedding.assert_called_once()
         # Check the cached embedding structure
@@ -312,7 +337,12 @@ class TestEmbedder:
         """Test scenario with some cached and some new embeddings."""
         texts = ["Cached text", "New text"]
         from settings import settings as real_settings
-        original = (real_settings.openai_stub, real_settings.chunking_version, real_settings.preprocess_version)
+
+        original = (
+            real_settings.openai_stub,
+            real_settings.chunking_version,
+            real_settings.preprocess_version,
+        )
         try:
             real_settings.openai_stub = True
             real_settings.chunking_version = 1
@@ -328,7 +358,7 @@ class TestEmbedder:
                         dim=2,
                         vector=self.embedder._vector_to_bytes([0.1, 0.2]),
                         chunking_version=1,
-                        preprocess_version=1
+                        preprocess_version=1,
                     )
                 return None
 
@@ -336,7 +366,11 @@ class TestEmbedder:
 
             results = await self.embedder.embed_texts(texts)
         finally:
-            (real_settings.openai_stub, real_settings.chunking_version, real_settings.preprocess_version) = original
+            (
+                real_settings.openai_stub,
+                real_settings.chunking_version,
+                real_settings.preprocess_version,
+            ) = original
         assert len(results) == 2
         # One cache hit (first text), one miss (second text)
         assert self.embedder.metrics.embed_cached_hits == 1

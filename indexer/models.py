@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class TgSyncState(BaseModel):
     """Sync state per chat."""
+
     chat_id: str
     last_message_id: Optional[int] = None
     last_edit_ts: Optional[int] = None
@@ -13,6 +14,7 @@ class TgSyncState(BaseModel):
 
 class EmbeddingCache(BaseModel):
     """Cached embedding for text."""
+
     text_hash: str
     model: str
     dim: int
@@ -24,6 +26,7 @@ class EmbeddingCache(BaseModel):
 
 class Chunk(BaseModel):
     """Processed message chunk."""
+
     chunk_id: str
     chat_id: str
     message_id: int
@@ -41,6 +44,7 @@ class Chunk(BaseModel):
 
 class VespaDocument(BaseModel):
     """Vespa document structure."""
+
     id: str
     chat_id: str
     message_id: int
@@ -61,6 +65,7 @@ class VespaDocument(BaseModel):
 
 class IndexerMetrics(BaseModel):
     """Runtime metrics."""
+
     messages_scanned: int = 0
     messages_indexed: int = 0
     chunks_written: int = 0

@@ -9,11 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Mock settings globally before any imports
-sys.modules['settings'] = MagicMock()
+sys.modules["settings"] = MagicMock()
 mock_settings = MagicMock()
 mock_settings.target_chunk_tokens = 512
 mock_settings.chunk_overlap_tokens = 50
-sys.modules['settings'].settings = mock_settings
+sys.modules["settings"].settings = mock_settings
 
 # Now we can safely import chunker
 from chunker import TextChunker
@@ -36,10 +36,10 @@ class TestTextChunker:
     def test_chunk_short_text(self):
         """Test chunking text shorter than target."""
         short_text = "This is a short text."
-        
-        with patch.object(self.chunker, 'count_tokens', return_value=10):
+
+        with patch.object(self.chunker, "count_tokens", return_value=10):
             chunks = self.chunker.chunk_text(short_text)
-        
+
         assert len(chunks) == 1
         # chunk_text returns (full_text, bm25_text) tuples
         assert chunks[0] == (short_text, short_text)
@@ -48,10 +48,10 @@ class TestTextChunker:
         """Test chunking with header."""
         text = "This is test content."
         header = "Header: Test"
-        
-        with patch.object(self.chunker, 'count_tokens', return_value=10):
+
+        with patch.object(self.chunker, "count_tokens", return_value=10):
             chunks = self.chunker.chunk_text(text, header)
-        
+
         assert len(chunks) == 1
         full_text, bm25_text = chunks[0]
         assert header in full_text
@@ -66,10 +66,10 @@ class TestTextChunker:
     def test_single_sentence_handling(self):
         """Test handling of single sentence text."""
         sentence = "This is a single sentence."
-        
-        with patch.object(self.chunker, 'count_tokens', return_value=5):
+
+        with patch.object(self.chunker, "count_tokens", return_value=5):
             chunks = self.chunker.chunk_text(sentence)
-        
+
         assert len(chunks) == 1
         full_text, bm25_text = chunks[0]
         assert full_text == sentence
