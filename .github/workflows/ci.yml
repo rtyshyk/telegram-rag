@@ -34,6 +34,29 @@ jobs:
       - run: pip install -r api/requirements.txt
       - run: pytest api/tests
 
+  indexer-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Python dependencies
+        run: |
+          pip install -r indexer/requirements.txt || true
+          pip install pytest pytest-asyncio pydantic-settings
+      - name: Run indexer tests
+        env:
+          OPENAI_API_KEY: test
+          TG_API_ID: "12345"
+          TG_API_HASH: testhash
+          TG_PHONE: "+10000000000"
+          DATABASE_URL: sqlite:///test.db
+          VESPA_ENDPOINT: http://localhost:8080
+          OPENAI_STUB: "true"
+          TELETHON_STUB: "true"
+        run: pytest indexer/tests -q
+
   ui-tests:
     runs-on: ubuntu-latest
     steps:
