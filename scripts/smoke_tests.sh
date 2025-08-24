@@ -1,30 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "🚀 Starting smoke tests..."
+
 # Test API health
-curl -fsS http://localhost:8000/healthz | grep -q '"status":"ok"'
+echo -n "📡 Testing API health... "
+if curl -fsS http://localhost:8000/healthz | grep -q '"status":"ok"'; then
+	echo "✅ PASS"
+else
+	echo "❌ FAIL"
+	exit 1
+fi
 
 # Test UI login page (try both development and production ports)
+echo -n "🌐 Testing UI availability... "
 if curl -fsS http://localhost:4321/login >/dev/null 2>&1; then
-	echo "✅ UI available on development port (4321)"
+	echo "✅ PASS (development port 4321)"
 	UI_PORT=4321
 elif curl -fsS http://localhost:3000/login >/dev/null 2>&1; then
-	echo "✅ UI available on production port (3000)"
+	echo "✅ PASS (production port 3000)"
 	UI_PORT=3000
 else
-	echo "❌ UI not available on either port 3000 or 4321"
+	echo "❌ FAIL (not available on ports 3000 or 4321)"
 	exit 1
 fi
 
 # Test Vespa
-curl -fsS http://localhost:19071/ApplicationStatus >/dev/null
+echo -n "🔍 Testing Vespa search engine... "
+if curl -fsS http://localhost:19071/ApplicationStatus >/dev/null; then
+	echo "✅ PASS"
+else
+	echo "❌ FAIL"
+	exit 1
+fi
 
 # Test authentication
-curl -fsS -c cookies.txt -H 'Content-Type: application/json' \
+echo -n "🔐 Testing authentication... "
+if curl -fsS -c cookies.txt -H 'Content-Type: application/json' \
 	-d '{"username":"admin","password":"password"}' \
-	http://localhost:8000/auth/login | grep -q '"ok":true'
+	http://localhost:8000/auth/login | grep -q '"ok":true'; then
+	echo "✅ PASS"
+else
+	echo "❌ FAIL"
+	exit 1
+fi
 
 # Test models endpoint
-curl -fsS -b cookies.txt http://localhost:8000/models | grep -q 'gpt-5'
+echo -n "🤖 Testing models endpoint... "
+if curl -fsS -b cookies.txt http://localhost:8000/models | grep -q 'gpt-5'; then
+	echo "✅ PASS"
+else
+	echo "❌ FAIL"
+	exit 1
+fi
 
-echo "✅ All smoke tests passed"
+echo ""
+echo "🎉 All smoke tests passed successfully!"
