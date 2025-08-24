@@ -39,36 +39,32 @@ class TestNormalizeText:
         """Test normalizing text with HTTP link."""
         input_text = "Check out http://example.com for more info."
         text, bm25_text, has_link = normalize_text(input_text)
-
-    assert text == input_text  # Original text preserved
-    assert bm25_text == input_text
-    assert has_link is True
+        assert text == input_text  # Original text preserved
+        assert bm25_text == input_text
+        assert has_link is True
 
     def test_normalize_text_with_https_link(self):
         """Test normalizing text with HTTPS link."""
         input_text = "Visit https://secure-site.com/path?query=value"
         text, bm25_text, has_link = normalize_text(input_text)
-
-    assert text == input_text
-    assert bm25_text == input_text
-    assert has_link is True
+        assert text == input_text
+        assert bm25_text == input_text
+        assert has_link is True
 
     def test_normalize_text_with_multiple_links(self):
         """Test normalizing text with multiple links."""
         input_text = "First http://site1.com and second https://site2.com links."
         text, bm25_text, has_link = normalize_text(input_text)
-
-    assert text == input_text
-    assert bm25_text == input_text
-    assert has_link is True
+        assert text == input_text
+        assert bm25_text == input_text
+        assert has_link is True
 
     def test_normalize_text_case_insensitive_links(self):
         """Test that link detection is case insensitive."""
         input_text = "Visit HTTP://EXAMPLE.COM and HTTPS://TEST.COM"
         text, bm25_text, has_link = normalize_text(input_text)
         assert has_link is True
-
-    assert "HTTP://EXAMPLE.COM" in bm25_text
+        assert "HTTP://EXAMPLE.COM" in bm25_text
 
     def test_normalize_whitespace_cleanup(self):
         """Test whitespace normalization."""
@@ -83,9 +79,8 @@ class TestNormalizeText:
         input_text = "Check   http://example.com   for    info"
         text, bm25_text, has_link = normalize_text(input_text)
         assert text == "Check http://example.com for info"
-
-    assert bm25_text == "Check http://example.com for info"
-    assert has_link is True
+        assert bm25_text == "Check http://example.com for info"
+        assert has_link is True
 
     def test_normalize_complex_urls(self):
         """Test normalization with complex URLs."""
@@ -94,8 +89,7 @@ class TestNormalizeText:
         )
         text, bm25_text, has_link = normalize_text(input_text)
         assert has_link is True
-
-    assert bm25_text == input_text
+        assert bm25_text == input_text
 
 
 class TestCreateHeader:
