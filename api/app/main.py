@@ -9,6 +9,7 @@ from .auth import (
     record_attempt,
     verify_password,
 )
+from .search import router as search_router
 from .settings import settings
 
 app = FastAPI()
@@ -26,6 +27,9 @@ app.add_middleware(
 )
 
 app.add_middleware(AuthMiddleware)
+
+# Mount search router
+app.include_router(search_router)
 
 
 @app.get("/healthz")
@@ -76,7 +80,6 @@ async def logout(response: Response):
 @app.get("/models")
 async def models() -> list[dict[str, str]]:
     return [
-        {"label": "gpt 5", "id": "gpt-5"},
-        {"label": "gpt5 mini", "id": "gpt-5-mini"},
-        {"label": "gpt5 nano", "id": "gpt-5-nano"},
+        {"label": label, "id": model_id}
+        for label, model_id in settings.model_map.items()
     ]

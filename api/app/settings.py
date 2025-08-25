@@ -17,5 +17,23 @@ class Settings(BaseSettings):
     login_rate_window_seconds: int = 900
     ui_origin: str | None = None
 
+    # Search / Vespa configuration with sane defaults
+    recency_halflife_days: int = 90
+    vespa_query_timeout_ms: int = 250
+    query_embed_cache_size: int = 256
+    query_embed_cache_ttl_sec: int = 300
+    search_default_limit: int = 20
+    search_max_limit: int = 100
+
+    # Map of UI model labels to embedding model ids
+    model_map: dict[str, str] = {
+        "gpt 5": "gpt-5",
+        "gpt5 mini": "gpt-5-mini",
+        "gpt5 nano": "gpt-5-nano",
+    }
+
+    # Deterministic embedding stub for tests
+    openai_stub: bool = True
+
 
 settings = Settings()
