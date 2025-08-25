@@ -26,6 +26,10 @@ services:
     environment:
       VESPA_CONFIGSERVERS: vespa
       VESPA_IGNORE_NOT_ENOUGH_MEMORY: "true"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - vespa_data:/opt/vespa/var
     ports:
@@ -39,9 +43,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 8G
         reservations:
-          memory: 2G
+          memory: 4G
 
   vespa-deploy:
     build:
@@ -49,7 +53,8 @@ services:
       dockerfile: Dockerfile.vespa-deploy
     depends_on:
       vespa:
-        condition: service_healthy
+        # Start deployment helper as soon as Vespa container is started; script itself waits for readiness.
+        condition: service_started
     restart: "no"
 
   api:
@@ -68,8 +73,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      vespa-deploy:
-        condition: service_completed_successfully
     ports:
       - "8000:8000"
     healthcheck:
@@ -99,12 +102,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 128M
 
   indexer:
     build: ./indexer

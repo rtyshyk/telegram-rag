@@ -8,3 +8,4 @@ ui/playwright-report/
 ui/test-results/
 .venv/
 cookies.txt
+indexer/sessions

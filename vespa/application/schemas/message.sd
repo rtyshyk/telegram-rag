@@ -11,8 +11,29 @@ schema message {
       indexing: index | summary
       index: enable-bm25
     }
-    field vector type tensor<float>(x[3072]) {
-      indexing: attribute | summary
+    field vector_small type tensor<float>(x[1536]) {
+      indexing: attribute | index | summary
+      attribute {
+        distance-metric: euclidean
+      }
+      index {
+        hnsw {
+          max-links-per-node: 16
+          neighbors-to-explore-at-insert: 200
+        }
+      }
+    }
+    field vector_large type tensor<float>(x[3072]) {
+      indexing: attribute | index | summary
+      attribute {
+        distance-metric: euclidean
+      }
+      index {
+        hnsw {
+          max-links-per-node: 16
+          neighbors-to-explore-at-insert: 200
+        }
+      }
     }
     field chat_id type string {
       indexing: attribute | summary
@@ -52,8 +73,8 @@ schema message {
     }
   }
   
-  fieldset default { 
-    fields: text, bm25_text 
+  fieldset default {
+    fields: text, bm25_text
   }
   
   rank-profile default {
@@ -62,9 +83,34 @@ schema message {
     }
   }
   
-  rank-profile hybrid {
+  rank-profile hybrid-small {
+    inputs {
+      query(qv_small) tensor<float>(x[1536])
+    }
     first-phase {
-      expression: 1.6 * closeness(field, vector) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
+      # nearestNeighbor(vector_small,qv_small) adds closeness(vector_small)
+      expression: 1.6 * closeness(vector_small) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
+    }
+  }
+  
+  rank-profile hybrid-large {
+    inputs {
+      query(qv_large) tensor<float>(x[3072])
+    }
+    first-phase {
+      # nearestNeighbor(vector_large,qv_large) adds closeness(vector_large)
+      expression: 1.6 * closeness(vector_large) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
+    }
+  }
+  
+  # Legacy hybrid profile for backward compatibility (uses small by default)
+  rank-profile hybrid {
+    inputs {
+      query(qv) tensor<float>(x[1536])
+    }
+    first-phase {
+      # nearestNeighbor(vector_small,qv) adds closeness(vector_small)
+      expression: 1.6 * closeness(vector_small) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
     }
   }
 }

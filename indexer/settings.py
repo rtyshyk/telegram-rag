@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str
     embed_model: str = "text-embedding-3-large"
+    embed_dimensions: int = 3072
     embed_batch_size: int = 64
     embed_concurrency: int = 4
 

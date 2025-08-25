@@ -60,7 +60,8 @@ class VespaDocument(BaseModel):
     has_link: bool = False
     text: str
     bm25_text: str
-    vector: dict  # {"values": [float, ...]}
+    vector_small: Optional[dict] = None  # {"values": [float, ...]} for 1536-dim
+    vector_large: Optional[dict] = None  # {"values": [float, ...]} for 3072-dim
 
 
 class IndexerMetrics(BaseModel):

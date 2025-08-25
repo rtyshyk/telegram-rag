@@ -237,6 +237,19 @@ class TelegramIndexer:
         # Create Vespa documents
         vespa_docs = []
         for chunk_obj, (text_hash, vector) in zip(chunk_objects, embeddings):
+            # Determine which vector field to use based on embedding dimensions
+            vector_dict = {"values": vector}
+            if settings.embed_dimensions == 1536:
+                vector_small = vector_dict
+                vector_large = None
+            elif settings.embed_dimensions == 3072:
+                vector_small = None
+                vector_large = vector_dict
+            else:
+                raise ValueError(
+                    f"Unsupported embedding dimension: {settings.embed_dimensions}. Only 1536 and 3072 are supported."
+                )
+
             doc = VespaDocument(
                 id=chunk_obj.chunk_id,
                 chat_id=chunk_obj.chat_id,
@@ -252,7 +265,8 @@ class TelegramIndexer:
                 has_link=chunk_obj.has_link,
                 text=texts_to_embed[chunk_obj.chunk_idx],
                 bm25_text=bm25_text,
-                vector={"values": vector},
+                vector_small=vector_small,
+                vector_large=vector_large,
             )
             vespa_docs.append(doc)
 

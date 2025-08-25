@@ -2,6 +2,14 @@
 
 Personal, Dockerized RA- **Auto-deploy Vespa `application.zip` on container start; fail fast on schema mismatch**
 
+## Commands
+
+Index chat
+
+```
+docker compose run --rm indexer python main.py --once --chats '<Saved Messages>' --days 30 --limit-messages 50
+```
+
 ---
 
 ## Architecture

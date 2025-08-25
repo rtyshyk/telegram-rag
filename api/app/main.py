@@ -10,21 +10,32 @@ from .auth import (
     verify_password,
 )
 from .settings import settings
+from .search import SearchRequest, get_search_client
 
 app = FastAPI()
 
-# Add CORS middleware first
+# Build allowed origins list dynamically (used by CORS middleware added LAST so it's outermost)
+_base_allowed = {
+    "http://localhost:4321",  # Astro default dev port
+    "http://localhost:3000",  # Alt dev port
+    "http://127.0.0.1:4321",
+    "http://127.0.0.1:3000",
+}
+if settings.ui_origin:
+    _base_allowed.add(settings.ui_origin.rstrip("/"))
+allowed_origins = sorted(_base_allowed)
+if settings.cors_allow_all:
+    allowed_origins = ["*"]
+
+# CORS FIRST (outermost) so every response (even early auth failures) gets headers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:4321",
-        "http://localhost:3000",
-    ],  # Both dev and prod UI ports
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+# Auth after CORS
 app.add_middleware(AuthMiddleware)
 
 
@@ -55,12 +66,14 @@ async def login(request: Request, response: Response):
         )
     token = create_session(username)
     response = JSONResponse({"ok": True})
+    # Only mark secure if the request scheme is https (avoids losing cookie on http://localhost dev)
+    secure_flag = request.url.scheme == "https"
     response.set_cookie(
         "rag_session",
         token,
         httponly=True,
         samesite="lax",
-        secure=True,
+        secure=secure_flag,
         path="/",
     )
     return response
@@ -80,3 +93,10 @@ async def models() -> list[dict[str, str]]:
         {"label": "gpt5 mini", "id": "gpt-5-mini"},
         {"label": "gpt5 nano", "id": "gpt-5-nano"},
     ]
+
+
+@app.post("/search")
+async def search(req: SearchRequest):
+    client = await get_search_client()
+    results = await client.search(req)
+    return {"ok": True, "results": [r.model_dump() for r in results]}

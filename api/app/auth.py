@@ -57,20 +57,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.public_paths = {"/healthz", "/auth/login"}
 
     async def dispatch(self, request: Request, call_next):
+        # Always allow CORS preflight to pass through
+        if request.method == "OPTIONS":
+            return await call_next(request)
         if request.url.path in self.public_paths:
             return await call_next(request)
         token = request.cookies.get("rag_session")
         if not token:
-            return JSONResponse(
+            resp = JSONResponse(
                 {"ok": False, "error": "unauthorized"},
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
+            return resp
         try:
             payload = decode_session(token)
             request.state.user = payload.get("sub")
         except Exception:
-            return JSONResponse(
+            resp = JSONResponse(
                 {"ok": False, "error": "unauthorized"},
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
+            return resp
         return await call_next(request)

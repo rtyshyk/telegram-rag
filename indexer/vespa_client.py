@@ -41,26 +41,31 @@ class VespaClient:
         doc_url = f"{self.feed_url_base}/{doc.id}"
 
         # Prepare document for Vespa
-        vespa_doc = {
-            "fields": {
-                "id": doc.id,
-                "text": doc.text,
-                "bm25_text": doc.bm25_text,
-                "vector": doc.vector,
-                "chat_id": doc.chat_id,
-                "message_id": doc.message_id,
-                "chunk_idx": doc.chunk_idx,
-                "source_title": doc.source_title or "",
-                "sender": doc.sender or "",
-                "sender_username": doc.sender_username or "",
-                "chat_type": doc.chat_type or "",
-                "message_date": doc.message_date,
-                "edit_date": doc.edit_date,
-                "thread_id": doc.thread_id,
-                "has_link": doc.has_link,
-                "date": doc.message_date,  # For backward compatibility
-            }
+        vespa_fields = {
+            "id": doc.id,
+            "text": doc.text,
+            "bm25_text": doc.bm25_text,
+            "chat_id": doc.chat_id,
+            "message_id": doc.message_id,
+            "chunk_idx": doc.chunk_idx,
+            "source_title": doc.source_title or "",
+            "sender": doc.sender or "",
+            "sender_username": doc.sender_username or "",
+            "chat_type": doc.chat_type or "",
+            "message_date": doc.message_date,
+            "edit_date": doc.edit_date,
+            "thread_id": doc.thread_id,
+            "has_link": doc.has_link,
+            "date": doc.message_date,  # For backward compatibility
         }
+
+        # Add vector fields if present
+        if doc.vector_small:
+            vespa_fields["vector_small"] = doc.vector_small
+        if doc.vector_large:
+            vespa_fields["vector_large"] = doc.vector_large
+
+        vespa_doc = {"fields": vespa_fields}
         # Retry with exponential backoff
         for attempt in range(3):
             try:

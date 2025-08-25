@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     login_rate_max_attempts: int = 5
     login_rate_window_seconds: int = 900
     ui_origin: str | None = None
+    cors_allow_all: bool = False
+    # Search / Embeddings
+    openai_api_key: str | None = None
+    embed_model: str = "text-embedding-3-large"
+    embed_dimensions: int = 3072
+    vespa_endpoint: str = "http://vespa:8080"
 
 
 settings = Settings()
