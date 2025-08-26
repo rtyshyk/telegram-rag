@@ -141,7 +141,7 @@ class TestVespaDocument:
             message_date=1692825600,
             text="Hello world",
             bm25_text="Hello world",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         assert doc.id == "doc123"
@@ -151,7 +151,7 @@ class TestVespaDocument:
         assert doc.message_date == 1692825600
         assert doc.text == "Hello world"
         assert doc.bm25_text == "Hello world"
-        assert doc.vector == {"values": [0.1, 0.2, 0.3]}
+        assert doc.vector_small == {"values": [0.1, 0.2, 0.3]}
         assert doc.has_link is False
 
     def test_create_full_document(self):
@@ -171,7 +171,7 @@ class TestVespaDocument:
             has_link=True,
             text="Hello world with link https://example.com",
             bm25_text="Hello world with link https://example.com",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         assert doc.source_title == "Test Chat"

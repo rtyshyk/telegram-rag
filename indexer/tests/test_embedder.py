@@ -62,30 +62,6 @@ class TestEmbedder:
         for i in range(len(vector)):
             assert abs(restored_vector[i] - vector[i]) < 1e-6
 
-    def test_generate_stub_vector(self):
-        """Test deterministic stub vector generation."""
-        text_hash = "abc123def456"
-
-        # Generate vector
-        vector1 = self.embedder._generate_stub_vector(text_hash)
-        vector2 = self.embedder._generate_stub_vector(text_hash)
-
-        # Should be deterministic
-        assert vector1 == vector2
-        assert len(vector1) == 3072  # Default dimension
-
-        # Should be normalized
-        magnitude = sum(x * x for x in vector1) ** 0.5
-        assert abs(magnitude - 1.0) < 1e-6
-
-        # Different hash should produce different vector
-        vector3 = self.embedder._generate_stub_vector("different_hash")
-        assert vector1 != vector3
-
-        # Test custom dimension
-        vector4 = self.embedder._generate_stub_vector(text_hash, dim=100)
-        assert len(vector4) == 100
-
     @pytest.mark.asyncio
     async def test_embed_empty_texts(self):
         """Test embedding empty text list."""
@@ -140,17 +116,32 @@ class TestEmbedder:
         # Mock no cached embeddings
         self.mock_db.get_cached_embedding.return_value = None
 
-        # Mock API response
-        # Patch specific attributes rather than replacing whole settings object
+        # Mock API response that returns correct number of embeddings based on input
+        async def mock_create(*args, **kwargs):
+            input_texts = kwargs.get("input", args[1] if len(args) > 1 else [])
+            if not isinstance(input_texts, list):
+                input_texts = [input_texts]
+
+            mock_response = MagicMock()
+            mock_response.data = []
+            for i in range(len(input_texts)):
+                mock_vector = [
+                    0.1 + i * 0.1,
+                    0.2 + i * 0.1,
+                    0.3 + i * 0.1,
+                ] * 1024  # 3072 dimensions
+                mock_response.data.append(MagicMock(embedding=mock_vector))
+            return mock_response
+
+        self.embedder.client.embeddings.create = AsyncMock(side_effect=mock_create)
+
         from settings import settings as real_settings
 
         original = (
-            real_settings.openai_stub,
             real_settings.daily_embed_budget_usd,
             real_settings.chunking_version,
             real_settings.preprocess_version,
         )
-        real_settings.openai_stub = True
         real_settings.daily_embed_budget_usd = 10.0
         real_settings.chunking_version = 1
         real_settings.preprocess_version = 1
@@ -159,7 +150,6 @@ class TestEmbedder:
             results = await self.embedder.embed_texts(texts)
         finally:
             (
-                real_settings.openai_stub,
                 real_settings.daily_embed_budget_usd,
                 real_settings.chunking_version,
                 real_settings.preprocess_version,
@@ -217,24 +207,31 @@ class TestEmbedder:
             real_settings.openai_stub, real_settings.daily_embed_budget_usd = original
 
     @pytest.mark.asyncio
-    async def test_embed_batch_stub_mode(self):
-        """Test batch embedding in stub mode."""
+    async def test_embed_batch_with_mocking(self):
+        """Test batch embedding with proper API mocking."""
         batch = [("Hello world", "hash1"), ("Test message", "hash2")]
         semaphore = asyncio.Semaphore(1)
 
-        from settings import settings as real_settings
+        # Mock successful API response
+        mock_vectors = [
+            [0.1, 0.2, 0.3] * 1024,  # 3072 dimensions
+            [0.4, 0.5, 0.6] * 1024,  # 3072 dimensions
+        ]
 
-        original = real_settings.openai_stub
-        real_settings.openai_stub = True
-        try:
-            results = await self.embedder._embed_batch(batch, semaphore)
-        finally:
-            real_settings.openai_stub = original
+        mock_response = MagicMock()
+        mock_response.data = [
+            MagicMock(embedding=mock_vectors[0]),
+            MagicMock(embedding=mock_vectors[1]),
+        ]
+        self.embedder.client.embeddings.create = AsyncMock(return_value=mock_response)
+
+        results = await self.embedder._embed_batch(batch, semaphore)
+
         assert len(results) == 2
         for text_hash, vector in results:
             assert isinstance(text_hash, str)
             assert isinstance(vector, list)
-            assert len(vector) > 0
+            assert len(vector) == 3072  # Verify correct dimensions
 
     @pytest.mark.asyncio
     async def test_embed_batch_api_retry(self):
@@ -296,15 +293,19 @@ class TestEmbedder:
         texts = ["Hello world"]
         self.mock_db.get_cached_embedding.return_value = None
 
+        # Mock API response
+        mock_vector = [0.1, 0.2, 0.3] * 1024  # 3072 dimensions
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(embedding=mock_vector)]
+        self.embedder.client.embeddings.create = AsyncMock(return_value=mock_response)
+
         from settings import settings as real_settings
 
         original = (
-            real_settings.openai_stub,
             real_settings.chunking_version,
             real_settings.preprocess_version,
         )
         try:
-            real_settings.openai_stub = True
             real_settings.chunking_version = 1
             real_settings.preprocess_version = 1
             # Compute expected hash after ensuring versions are set
@@ -312,7 +313,6 @@ class TestEmbedder:
             await self.embedder.embed_texts(texts)
         finally:
             (
-                real_settings.openai_stub,
                 real_settings.chunking_version,
                 real_settings.preprocess_version,
             ) = original
@@ -336,15 +336,20 @@ class TestEmbedder:
     async def test_mixed_cache_scenario(self):
         """Test scenario with some cached and some new embeddings."""
         texts = ["Cached text", "New text"]
+
+        # Mock API response for the new text
+        mock_vector = [0.4, 0.5, 0.6] * 1024  # 3072 dimensions
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(embedding=mock_vector)]
+        self.embedder.client.embeddings.create = AsyncMock(return_value=mock_response)
+
         from settings import settings as real_settings
 
         original = (
-            real_settings.openai_stub,
             real_settings.chunking_version,
             real_settings.preprocess_version,
         )
         try:
-            real_settings.openai_stub = True
             real_settings.chunking_version = 1
             real_settings.preprocess_version = 1
             # Compute cached hash after ensuring versions match
@@ -367,7 +372,6 @@ class TestEmbedder:
             results = await self.embedder.embed_texts(texts)
         finally:
             (
-                real_settings.openai_stub,
                 real_settings.chunking_version,
                 real_settings.preprocess_version,
             ) = original
@@ -377,3 +381,61 @@ class TestEmbedder:
         assert self.embedder.metrics.embed_cached_misses == 1
         # Should cache only the new embedding (second text)
         self.mock_db.cache_embedding.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "model,expected_dim",
+        [
+            ("text-embedding-3-small", 1536),
+            ("text-embedding-3-large", 3072),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_vector_large_embeddings(self, model, expected_dim):
+        """Test embeddings for both small (1536-dim) and large (3072-dim) models."""
+        texts = ["Test message for vector_large embedding"]
+
+        # Mock no cached embeddings
+        self.mock_db.get_cached_embedding.return_value = None
+
+        # Temporarily set the model
+        original_model = self.embedder.model
+        self.embedder.model = model
+
+        # Create mock vector with correct dimensions
+        mock_vector = [0.1] * expected_dim
+
+        # Mock the OpenAI API response
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(embedding=mock_vector)]
+        self.embedder.client.embeddings.create = AsyncMock(return_value=mock_response)
+
+        from settings import settings as real_settings
+
+        original = (
+            real_settings.chunking_version,
+            real_settings.preprocess_version,
+        )
+        try:
+            real_settings.chunking_version = 1
+            real_settings.preprocess_version = 1
+
+            results = await self.embedder.embed_texts(texts)
+        finally:
+            # Restore original settings
+            (
+                real_settings.chunking_version,
+                real_settings.preprocess_version,
+            ) = original
+            self.embedder.model = original_model
+
+        assert len(results) == 1
+        text_hash, vector = results[0]
+        assert isinstance(text_hash, str)
+        assert isinstance(vector, list)
+        assert len(vector) == expected_dim
+
+        # Verify caching was called with correct model
+        self.mock_db.cache_embedding.assert_called_once()
+        cached_call = self.mock_db.cache_embedding.call_args[0][0]
+        assert cached_call.model == model
+        assert cached_call.dim == expected_dim

@@ -26,14 +26,19 @@ const formatTelegramLink = (
   sourceTitle?: string,
   chatType?: string,
 ) => {
-  console.log('Formatting Telegram link:', { chatId, messageId, sourceTitle, chatType });
-  
+  console.log("Formatting Telegram link:", {
+    chatId,
+    messageId,
+    sourceTitle,
+    chatType,
+  });
+
   // For Saved Messages, try the standard web format first
   if (sourceTitle === "Saved Messages") {
     // For Saved Messages, we can try opening the direct message link
     // but it might not work in browser - fallback to opening Saved Messages
     const link = `https://web.telegram.org/k/#@me`;
-    console.log('Saved Messages link:', link);
+    console.log("Saved Messages link:", link);
     return link;
   }
 
@@ -46,7 +51,7 @@ const formatTelegramLink = (
     const cleanChatId = chatId.substring(4);
     // Use the private message link format: t.me/c/<channel>/<id>
     const link = `https://t.me/c/${cleanChatId}/${messageId}`;
-    console.log('Supergroup/channel link:', link);
+    console.log("Supergroup/channel link:", link);
     return link;
   }
   // For regular groups (negative IDs starting with -)
@@ -55,7 +60,7 @@ const formatTelegramLink = (
     const cleanChatId = chatId.substring(1);
     // Use the private message link format: t.me/c/<channel>/<id>
     const link = `https://t.me/c/${cleanChatId}/${messageId}`;
-    console.log('Group link:', link);
+    console.log("Group link:", link);
     return link;
   }
   // For private chats (positive user IDs) - can't link to specific messages via HTTP
@@ -63,7 +68,7 @@ const formatTelegramLink = (
     // For private chats, we can't link to specific messages via HTTP links
     // Just open Telegram Web
     const link = `https://web.telegram.org/k/`;
-    console.log('Private chat link (no specific message):', link);
+    console.log("Private chat link (no specific message):", link);
     return link;
   }
 };

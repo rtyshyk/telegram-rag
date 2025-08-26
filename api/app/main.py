@@ -20,6 +20,8 @@ _base_allowed = {
     "http://localhost:3000",  # Alt dev port
     "http://127.0.0.1:4321",
     "http://127.0.0.1:3000",
+    "http://0.0.0.0:4321",  # Bind-all interface dev
+    "http://0.0.0.0:3000",  # Bind-all interface dev
 }
 if settings.ui_origin:
     _base_allowed.add(settings.ui_origin.rstrip("/"))
@@ -27,7 +29,9 @@ allowed_origins = sorted(_base_allowed)
 if settings.cors_allow_all:
     allowed_origins = ["*"]
 
-# CORS FIRST (outermost) so every response (even early auth failures) gets headers
+# Auth first (innermost)
+app.add_middleware(AuthMiddleware)
+# CORS last (outermost) so every response (even early auth failures) gets headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -35,8 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Auth after CORS
-app.add_middleware(AuthMiddleware)
 
 
 @app.get("/healthz")

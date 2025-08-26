@@ -28,7 +28,7 @@ services:
   indexer:
     build: ./indexer
     volumes:
-      - ./indexer/sessions:/sessions      
+      - ./indexer/sessions:/sessions
 
 volumes:
   api_reload_cache:

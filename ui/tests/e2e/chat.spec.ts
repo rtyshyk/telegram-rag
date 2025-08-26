@@ -7,21 +7,56 @@ test.describe("Chat Interface", () => {
       document.cookie = "rag_session=mock-session-token; Path=/";
     });
 
-    // Mock API endpoints
-    await page.route("**/models", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([
-          { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-          { id: "gpt-4", label: "GPT-4" },
-          { id: "claude-3", label: "Claude 3" },
-        ]),
-        headers: {
-          "Access-Control-Allow-Credentials": "true",
-          "Access-Control-Allow-Origin": "http://localhost:4321",
-        },
-      });
+    // Mock all API endpoints completely
+    await page.route("http://localhost:8000/**", async (route) => {
+      const url = route.request().url();
+
+      if (url.includes("/models")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+            { id: "gpt-4", label: "GPT-4" },
+            { id: "claude-3", label: "Claude 3" },
+          ]),
+        });
+      } else if (url.includes("/auth/logout")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      } else if (url.includes("/search")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            results: [
+              {
+                id: "mock-1",
+                text: "This is a mocked search result",
+                chat_id: "-100123456789",
+                message_id: 123,
+                chunk_idx: 0,
+                score: 0.95,
+                sender: "Test User",
+                message_date: Math.floor(Date.now() / 1000),
+                source_title: "Test Chat",
+                chat_type: "supergroup",
+              },
+            ],
+          }),
+        });
+      } else {
+        // Default success response for any other API calls
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      }
     });
 
     await page.route("**/auth/logout", async (route) => {
@@ -162,8 +197,13 @@ test.describe("Chat Interface", () => {
     await page.fill("textarea", "Test message with timestamp");
     await page.click('button:has-text("Send")');
 
-    // Should show timestamp in format HH:MM
-    await expect(page.locator("text=/\\d{1,2}:\\d{2}/")).toBeVisible();
+    // Should show timestamp in format HH:MM in the chat area (not search results)
+    await expect(
+      page
+        .locator(".text-xs.text-gray-500")
+        .locator("text=/\\d{1,2}:\\d{2}/")
+        .first(),
+    ).toBeVisible();
   });
 
   test("should scroll to bottom on new messages", async ({ page }) => {
@@ -174,8 +214,10 @@ test.describe("Chat Interface", () => {
       await page.waitForTimeout(100); // Small delay between messages
     }
 
-    // The last message should be visible
-    await expect(page.locator("text=Message 5")).toBeVisible();
+    // The last message should be visible in the chat area (not in search results)
+    await expect(
+      page.locator(".bg-blue-600").locator("text=Message 5"),
+    ).toBeVisible();
   });
 
   test("should maintain chat state during session", async ({ page }) => {

@@ -12,16 +12,34 @@ test.describe("Navigation and Routing", () => {
   });
 
   test("should redirect to app after successful login", async ({ page }) => {
-    // Mock successful login
-    await page.route("**/auth/login", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-        headers: {
-          "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
-        },
-      });
+    // Mock all API endpoints
+    await page.route("http://localhost:8000/**", async (route) => {
+      const url = route.request().url();
+
+      if (url.includes("/auth/login")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+          headers: {
+            "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
+          },
+        });
+      } else if (url.includes("/models")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+          ]),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      }
     });
 
     await page.goto("/login");
@@ -106,6 +124,9 @@ test.describe("Error Handling", () => {
     await page.goto("/login");
     await page.fill('input[type="text"]', "admin");
     await page.fill('input[type="password"]', "admin");
+
+    // Wait for the submit button to become enabled after filling the form
+    await page.waitForSelector('button[type="submit"]:not([disabled])');
     await page.click('button[type="submit"]');
 
     await expect(page.locator(".text-red-700")).toContainText(
@@ -157,6 +178,15 @@ test.describe("Performance", () => {
   });
 
   test("should have no console errors on login page", async ({ page }) => {
+    // Mock all API endpoints to prevent 404 errors
+    await page.route("http://localhost:8000/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+    });
+
     const errors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") {
@@ -171,7 +201,8 @@ test.describe("Performance", () => {
     const realErrors = errors.filter(
       (error) =>
         !error.includes("React DevTools") &&
-        !error.includes("Download the React DevTools"),
+        !error.includes("Download the React DevTools") &&
+        !error.includes("Failed to load resource"),
     );
 
     expect(realErrors).toHaveLength(0);

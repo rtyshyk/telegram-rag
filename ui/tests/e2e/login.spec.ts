@@ -2,33 +2,51 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Login Page", () => {
   test.beforeEach(async ({ page }) => {
-    // Mock the API endpoints
-    await page.route("**/auth/login", async (route) => {
-      const request = route.request();
-      const body = JSON.parse(request.postData() || "{}");
+    // Mock all API endpoints
+    await page.route("http://localhost:8000/**", async (route) => {
+      const url = route.request().url();
 
-      if (body.username === "admin" && body.password === "admin") {
+      if (url.includes("/auth/login")) {
+        const request = route.request();
+        const body = JSON.parse(request.postData() || "{}");
+
+        if (body.username === "admin" && body.password === "admin") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ ok: true }),
+            headers: {
+              "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
+            },
+          });
+        } else if (body.username === "rate-limited") {
+          await route.fulfill({
+            status: 429,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: "too_many_attempts" }),
+          });
+        } else {
+          await route.fulfill({
+            status: 401,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: "invalid_credentials" }),
+          });
+        }
+      } else if (url.includes("/models")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ success: true }),
-          headers: {
-            "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Origin": "http://localhost:4321",
-          },
-        });
-      } else if (body.username === "rate-limited") {
-        await route.fulfill({
-          status: 429,
-          contentType: "application/json",
-          body: JSON.stringify({ detail: "too_many_attempts" }),
+          body: JSON.stringify([
+            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+            { id: "gpt-4", label: "GPT-4" },
+          ]),
         });
       } else {
+        // Default success response for any other API calls
         await route.fulfill({
-          status: 401,
+          status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ detail: "invalid_credentials" }),
+          body: JSON.stringify({ ok: true }),
         });
       }
     });

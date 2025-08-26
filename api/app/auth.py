@@ -62,6 +62,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if request.url.path in self.public_paths:
             return await call_next(request)
+
         token = request.cookies.get("rag_session")
         if not token:
             resp = JSONResponse(

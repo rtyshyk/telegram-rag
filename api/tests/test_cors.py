@@ -5,7 +5,9 @@ BASE = pathlib.Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE))
 
 os.environ.setdefault("APP_USER", "admin")
-os.environ.setdefault("APP_USER_HASH_BCRYPT", "bcrypt$2b$12$placeholderhashhashhashhashhashh")
+os.environ.setdefault(
+    "APP_USER_HASH_BCRYPT", "bcrypt$2b$12$placeholderhashhashhashhashhashh"
+)
 os.environ.setdefault("SESSION_SECRET", "secret" * 4)
 
 from app.main import app  # noqa: E402

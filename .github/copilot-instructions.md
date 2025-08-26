@@ -32,6 +32,7 @@ pre-commit run --all-files
 - **For JavaScript/TypeScript tests**: Use VS Code test runner integration
 - **Never use terminal commands** like `pytest`, `npm test`, `vitest` directly
 - **Always verify tests pass** before committing changes
+- **Never write stubs in the production code**
 
 ## Code Standards
 

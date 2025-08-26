@@ -49,6 +49,13 @@ class Embedder:
             "text-embedding-ada-002": 0.0001,
         }
 
+        # Model dimensions
+        self.model_dimensions = {
+            "text-embedding-3-large": 3072,
+            "text-embedding-3-small": 1536,
+            "text-embedding-ada-002": 1536,
+        }
+
     def _compute_text_hash(self, text: str, lang: Optional[str] = None) -> str:
         """Compute hash for text caching."""
         cache_key = f"{text}|{self.model}|{settings.chunking_version}|{settings.preprocess_version}|{lang or ''}"
@@ -180,16 +187,6 @@ class Embedder:
     ) -> List[Tuple[str, List[float]]]:
         """Embed a single batch of texts."""
         async with semaphore:
-            if getattr(settings, "openai_stub", False) is True:
-                # Deterministic stub for testing
-                results = []
-                for text, text_hash in batch:
-                    # Generate deterministic vector from hash
-                    vector = self._generate_stub_vector(text_hash)
-                    results.append((text_hash, vector))
-                await asyncio.sleep(0.1)  # Simulate API delay
-                return results
-
             texts = [text for text, _ in batch]
 
             # Retry with exponential backoff
@@ -198,6 +195,11 @@ class Embedder:
                     response = await self.client.embeddings.create(
                         model=self.model, input=texts
                     )
+
+                    if len(response.data) != len(batch):
+                        raise ValueError(
+                            f"Response count mismatch: got {len(response.data)} embeddings for {len(batch)} texts"
+                        )
 
                     results = []
                     for i, embedding_data in enumerate(response.data):
@@ -220,26 +222,3 @@ class Embedder:
                         await asyncio.sleep(wait_time)
                     else:
                         raise
-
-    def _generate_stub_vector(self, text_hash: str, dim: int = 3072) -> List[float]:
-        """Generate deterministic vector for testing."""
-        # Use hex if possible; otherwise hash the input string
-        try:
-            hash_bytes = bytes.fromhex(text_hash)
-            if len(hash_bytes) == 0:  # fromhex("") => b""
-                raise ValueError
-        except ValueError:
-            hash_bytes = hashlib.sha256(text_hash.encode()).digest()
-        vector = []
-
-        for i in range(dim):
-            byte_idx = i % len(hash_bytes)
-            value = (hash_bytes[byte_idx] / 255.0) * 2.0 - 1.0  # Map to [-1, 1]
-            vector.append(value)
-
-        # Normalize vector
-        magnitude = sum(x * x for x in vector) ** 0.5
-        if magnitude > 0:
-            vector = [x / magnitude for x in vector]
-
-        return vector

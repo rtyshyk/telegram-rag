@@ -29,38 +29,65 @@ export class TestUtils {
    * Mock API endpoints for testing
    */
   async mockAPI() {
-    // Mock models endpoint
-    await this.page.route("**/models", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([
-          { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-          { id: "gpt-4", label: "GPT-4" },
-          { id: "claude-3", label: "Claude 3" },
-        ]),
-      });
-    });
+    // Mock all API calls to localhost:8000
+    await this.page.route("http://localhost:8000/**", async (route) => {
+      const url = route.request().url();
 
-    // Mock logout endpoint
-    await this.page.route("**/auth/logout", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-    });
-
-    // Mock login endpoint
-    await this.page.route("**/auth/login", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-        headers: {
-          "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
-        },
-      });
+      if (url.includes("/models")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+            { id: "gpt-4", label: "GPT-4" },
+            { id: "claude-3", label: "Claude 3" },
+          ]),
+        });
+      } else if (url.includes("/auth/logout")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      } else if (url.includes("/auth/login")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+          headers: {
+            "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
+          },
+        });
+      } else if (url.includes("/search")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            results: [
+              {
+                id: "mock-1",
+                text: "This is a mocked search result",
+                chat_id: "-100123456789",
+                message_id: 123,
+                chunk_idx: 0,
+                score: 0.95,
+                sender: "Test User",
+                message_date: Math.floor(Date.now() / 1000),
+                source_title: "Test Chat",
+                chat_type: "supergroup",
+              },
+            ],
+          }),
+        });
+      } else {
+        // Default success response for any other API calls
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      }
     });
   }
 

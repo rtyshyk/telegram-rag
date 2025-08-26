@@ -52,7 +52,7 @@ class TestVespaClient:
             message_date=1692825600,
             text="Test message",
             bm25_text="Test message",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # Mock successful response
@@ -80,7 +80,7 @@ class TestVespaClient:
             message_date=1692825600,
             text="Test message",
             bm25_text="Test message",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # Mock 201 Created response
@@ -107,7 +107,7 @@ class TestVespaClient:
             message_date=1692825600,
             text="Test message",
             bm25_text="Test message",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # Mock error response
@@ -139,7 +139,7 @@ class TestVespaClient:
             message_date=1692825600,
             text="Test message",
             bm25_text="Test message",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # Mock client that fails twice then succeeds
@@ -180,7 +180,7 @@ class TestVespaClient:
             message_date=1692825600,
             text="Test message",
             bm25_text="Test message",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # Mock client that always fails
@@ -218,7 +218,7 @@ class TestVespaClient:
                 message_date=1692825600,
                 text=f"Test message {i}",
                 bm25_text=f"Test message {i}",
-                vector={"values": [0.1 * i, 0.2 * i, 0.3 * i]},
+                vector_small={"values": [0.1 * i, 0.2 * i, 0.3 * i]},
             )
             for i in range(3)
         ]
@@ -249,7 +249,7 @@ class TestVespaClient:
                 message_date=1692825600,
                 text=f"Test message {i}",
                 bm25_text=f"Test message {i}",
-                vector={"values": [0.1 * i, 0.2 * i, 0.3 * i]},
+                vector_small={"values": [0.1 * i, 0.2 * i, 0.3 * i]},
             )
             for i in range(3)
         ]
@@ -442,7 +442,7 @@ class TestVespaClient:
             has_link=True,
             text="Test message with link",
             bm25_text="Test message with https://example.com",
-            vector={"values": [0.1, 0.2, 0.3]},
+            vector_small={"values": [0.1, 0.2, 0.3]},
         )
 
         # This would be the document structure sent to Vespa
@@ -450,7 +450,7 @@ class TestVespaClient:
             "id": "test:123:0:v1",
             "text": "Test message with link",
             "bm25_text": "Test message with https://example.com",
-            "vector": {"values": [0.1, 0.2, 0.3]},
+            "vector_small": {"values": [0.1, 0.2, 0.3]},
             "chat_id": "test_chat",
             "message_id": 123,
             "chunk_idx": 0,
@@ -470,3 +470,100 @@ class TestVespaClient:
             assert (
                 hasattr(doc, field) or field == "date"
             )  # date is derived from message_date
+
+    @pytest.mark.parametrize(
+        "vector_config,expected_fields",
+        [
+            # Test case 1: Only vector_large
+            (
+                {"vector_large": {"values": [0.1 * i for i in range(3072)]}},
+                {
+                    "has_vector_large": True,
+                    "has_vector_small": False,
+                    "large_dim": 3072,
+                },
+            ),
+            # Test case 2: Both vectors
+            (
+                {
+                    "vector_small": {"values": [0.1, 0.2, 0.3] * 512},  # 1536-dim
+                    "vector_large": {
+                        "values": [0.05 * i for i in range(3072)]
+                    },  # 3072-dim
+                },
+                {
+                    "has_vector_large": True,
+                    "has_vector_small": True,
+                    "large_dim": 3072,
+                    "small_dim": 1536,
+                },
+            ),
+            # Test case 3: Vector_large for search scenario
+            (
+                {
+                    "vector_large": {
+                        "values": [0.1 + (0.01 * i % 0.05) for i in range(3072)]
+                    }
+                },
+                {
+                    "has_vector_large": True,
+                    "has_vector_small": False,
+                    "large_dim": 3072,
+                },
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_feed_document_with_vector_large(
+        self, vector_config, expected_fields
+    ):
+        """Test document feeding with vector_large in various configurations."""
+        doc = VespaDocument(
+            id="test:123:0:v1",
+            chat_id="test",
+            message_id=123,
+            chunk_idx=0,
+            message_date=1692825600,
+            text="Test message with vector_large",
+            bm25_text="Test message with vector_large",
+            **vector_config,
+        )
+
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        mock_client = AsyncMock()
+
+        # Capture the request to verify vector fields
+        captured_request = {}
+
+        async def mock_post(url, json=None, headers=None):
+            captured_request.update(json or {})
+            return mock_response
+
+        mock_client.post = mock_post
+        self.client.client = mock_client
+
+        result = await self.client.feed_document(doc)
+
+        assert result is True
+        assert self.client.metrics.vespa_feed_success >= 1
+
+        # Verify the request contains expected vector fields
+        assert "fields" in captured_request
+        fields = captured_request["fields"]
+
+        # Check vector_large presence and dimensions
+        if expected_fields["has_vector_large"]:
+            assert "vector_large" in fields
+            assert len(fields["vector_large"]["values"]) == expected_fields["large_dim"]
+        else:
+            assert "vector_large" not in fields
+
+        # Check vector_small presence and dimensions
+        if expected_fields["has_vector_small"]:
+            assert "vector_small" in fields
+            assert len(fields["vector_small"]["values"]) == expected_fields["small_dim"]
+        else:
+            assert "vector_small" not in fields
