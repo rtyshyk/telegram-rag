@@ -2,64 +2,28 @@
 const API_BASE_RAW = import.meta.env.PUBLIC_API_URL;
 const API_BASE: string = API_BASE_RAW ? API_BASE_RAW.replace(/\/$/, "") : "";
 
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeoutMs = 10000,
-) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Request timeout");
-    }
-    throw error;
-  }
-}
-
 export async function login(username: string, password: string) {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/auth/login`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ username, password }),
-    },
-    10000,
-  );
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, password }),
+  });
   if (!res.ok) throw res;
 }
 
 export async function logout() {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/auth/logout`,
-    {
-      method: "POST",
-      credentials: "include",
-    },
-    5000,
-  );
+  const res = await fetch(`${API_BASE}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
   if (!res.ok) throw res;
 }
 
 export async function fetchModels() {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/models`,
-    {
-      credentials: "include",
-    },
-    5000,
-  );
+  const res = await fetch(`${API_BASE}/models`, {
+    credentials: "include",
+  });
   if (!res.ok) throw res;
   return res.json();
 }
@@ -94,7 +58,7 @@ export async function search(
   if (opts.chatId) payload.chat_id = opts.chatId;
   if (typeof opts.threadId === "number") payload.thread_id = opts.threadId;
   if (typeof opts.hybrid === "boolean") payload.hybrid = opts.hybrid;
-  const res = await fetchWithTimeout(
+  const res = await fetch(
     `${API_BASE}/search`,
     {
       method: "POST",
@@ -102,7 +66,6 @@ export async function search(
       credentials: "include",
       body: JSON.stringify(payload),
     },
-    15000,
   );
   if (res.status === 401) {
     // Redirect to login if unauthorized
