@@ -107,15 +107,25 @@ test.describe("Chat Interface", () => {
     const textarea = page.locator("textarea");
     const sendButton = page.locator('button:has-text("Send")');
 
-    // Type instead of fill to trigger React onChange event
-    await textarea.type("Hello, world!");
+    // Use a different approach to trigger React onChange
+    await textarea.focus();
+    await textarea.clear();
+    await page.keyboard.type("Hello, world!", { delay: 50 });
+
+    // Wait for React state to update and button to become enabled
     await expect(sendButton).toBeEnabled();
   });
 
   test("should send message and show typing indicator", async ({ page }) => {
     const message = "What is the weather today?";
 
-    await page.fill("textarea", message);
+    // Use focus and keyboard type to ensure React onChange is triggered
+    await page.locator("textarea").focus();
+    await page.locator("textarea").clear();
+    await page.keyboard.type(message, { delay: 50 });
+
+    // Wait for the send button to become enabled after typing
+    await page.waitForSelector('button:has-text("Send"):not([disabled])');
     await page.click('button:has-text("Send")');
 
     // Should show user message
@@ -194,7 +204,10 @@ test.describe("Chat Interface", () => {
   });
 
   test("should show message timestamps", async ({ page }) => {
-    await page.fill("textarea", "Test message with timestamp");
+    await page.locator("textarea").focus();
+    await page.locator("textarea").clear();
+    await page.keyboard.type("Test message with timestamp", { delay: 30 });
+    await page.waitForSelector('button:has-text("Send"):not([disabled])');
     await page.click('button:has-text("Send")');
 
     // Should show timestamp in format HH:MM in the chat area (not search results)
@@ -209,7 +222,10 @@ test.describe("Chat Interface", () => {
   test("should scroll to bottom on new messages", async ({ page }) => {
     // Send multiple messages to test auto-scroll
     for (let i = 1; i <= 5; i++) {
-      await page.fill("textarea", `Message ${i}`);
+      await page.locator("textarea").focus();
+      await page.locator("textarea").clear();
+      await page.keyboard.type(`Message ${i}`, { delay: 30 });
+      await page.waitForSelector('button:has-text("Send"):not([disabled])');
       await page.click('button:has-text("Send")');
       await page.waitForTimeout(100); // Small delay between messages
     }
@@ -222,7 +238,10 @@ test.describe("Chat Interface", () => {
 
   test("should maintain chat state during session", async ({ page }) => {
     // Send a message
-    await page.fill("textarea", "Persistent message");
+    await page.locator("textarea").focus();
+    await page.locator("textarea").clear();
+    await page.keyboard.type("Persistent message", { delay: 30 });
+    await page.waitForSelector('button:has-text("Send"):not([disabled])');
     await page.click('button:has-text("Send")');
 
     // Reload page
@@ -247,7 +266,10 @@ test.describe("Chat Interface", () => {
         10,
       );
 
-    await page.fill("textarea", longMessage);
+    await page.locator("textarea").focus();
+    await page.locator("textarea").clear();
+    await page.keyboard.type(longMessage, { delay: 10 });
+    await page.waitForSelector('button:has-text("Send"):not([disabled])');
     await page.click('button:has-text("Send")');
 
     // Should show the full message
