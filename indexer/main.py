@@ -70,12 +70,12 @@ class TelegramIndexer:
         """Run one-shot indexing."""
         logger.info(f"Starting one-shot indexing for {self.args.days} days")
 
-        # Validate chat list
+        # Get chat list - either from args or all available chats
         chat_list = self.args.get_chat_list()
         if not chat_list:
-            raise ValueError(
-                "--chats parameter is required. Example: --chats '<Saved Messages>,My Work Chat'"
-            )
+            logger.info("No specific chats provided, getting all available chats...")
+            chat_list = await self.tg_client.get_all_chats()
+            logger.info(f"Found {len(chat_list)} chats to process")
 
         logger.info(f"Target chats: {', '.join(chat_list)}")
 
@@ -97,16 +97,40 @@ class TelegramIndexer:
         since_date = datetime.now() - timedelta(days=self.args.days)
         logger.info(f"Fetching messages since {since_date.strftime('%Y-%m-%d %H:%M')}")
 
-        # Process each chat
+        # Process each chat with global message limit
+        total_messages_processed = 0
         for chat_name, chat_info in valid_chats:
             logger.info(f"Processing chat: {chat_info['title']}")
-            await self.process_chat(chat_info, since_date)
+
+            # Calculate remaining message limit
+            remaining_limit = None
+            if self.args.limit_messages:
+                remaining_limit = self.args.limit_messages - total_messages_processed
+                if remaining_limit <= 0:
+                    logger.info(
+                        f"Message limit ({self.args.limit_messages}) reached, stopping"
+                    )
+                    break
+
+            processed_count = await self.process_chat(
+                chat_info, since_date, remaining_limit
+            )
+            total_messages_processed += processed_count
 
         # Print final metrics
         self.print_metrics()
 
-    async def process_chat(self, chat_info: Dict[str, Any], since_date: datetime):
-        """Process all messages in a chat."""
+    async def process_chat(
+        self,
+        chat_info: Dict[str, Any],
+        since_date: datetime,
+        limit_messages: Optional[int] = None,
+    ) -> int:
+        """Process all messages in a chat.
+
+        Returns:
+            Number of messages processed from this chat
+        """
         chat_id = chat_info["id"]
         entity = chat_info["entity"]
 
@@ -114,7 +138,7 @@ class TelegramIndexer:
 
         try:
             async for message in self.tg_client.get_messages(
-                entity, limit=self.args.limit_messages, since_date=since_date
+                entity, limit=limit_messages, since_date=since_date
             ):
                 self.metrics.messages_scanned += 1
 
@@ -147,6 +171,8 @@ class TelegramIndexer:
         logger.info(
             f"Completed chat {chat_info['title']}: {messages_processed} messages processed"
         )
+
+        return messages_processed
 
     async def process_message(self, msg_data: Dict[str, Any]):
         """Process a single message into chunks and index them."""
@@ -366,7 +392,11 @@ def parse_args() -> CLIArgs:
     parser = argparse.ArgumentParser(description="Telegram RAG Indexer")
 
     parser.add_argument("--once", action="store_true", help="Run one-shot indexing")
-    parser.add_argument("--chats", type=str, help="Comma-separated chat names/IDs")
+    parser.add_argument(
+        "--chats",
+        type=str,
+        help="Comma-separated chat names/IDs (optional - defaults to all chats)",
+    )
     parser.add_argument("--days", type=int, default=30, help="Days of history to fetch")
     parser.add_argument(
         "--dry-run", action="store_true", help="Estimate costs without calling APIs"

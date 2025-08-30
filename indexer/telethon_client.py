@@ -105,6 +105,59 @@ class TelethonClientWrapper:
 
         return resolved
 
+    async def get_all_chats(self) -> List[str]:
+        """
+        Get all available chats/dialogs for the user.
+
+        Returns:
+            List of chat names that can be used with resolve_chats()
+        """
+        if settings.telethon_stub:
+            return ["<Saved Messages>", "Test Chat 1", "Test Chat 2"]
+
+        chat_names = []
+
+        try:
+            # Get all dialogs (conversations)
+            async for dialog in self.client.iter_dialogs():
+                if dialog.entity:
+                    chat_name = None
+                    # Get entity title/name
+                    if hasattr(dialog.entity, "title") and dialog.entity.title:
+                        # Group/Channel
+                        chat_name = dialog.entity.title
+                    elif (
+                        hasattr(dialog.entity, "first_name")
+                        and dialog.entity.first_name
+                    ):
+                        # User
+                        name = dialog.entity.first_name
+                        if (
+                            hasattr(dialog.entity, "last_name")
+                            and dialog.entity.last_name
+                        ):
+                            name += f" {dialog.entity.last_name}"
+                        chat_name = name
+                    elif hasattr(dialog.entity, "username") and dialog.entity.username:
+                        # Username fallback
+                        chat_name = f"@{dialog.entity.username}"
+
+                    # Only add non-empty chat names
+                    if chat_name and chat_name.strip():
+                        chat_names.append(chat_name.strip())
+
+            # Always include Saved Messages
+            chat_names.append("<Saved Messages>")
+
+            logger.info(f"Found {len(chat_names)} available chats")
+
+        except Exception as e:
+            logger.error(f"Error getting all chats: {e}")
+            # Fallback to at least Saved Messages
+            chat_names = ["<Saved Messages>"]
+
+        return chat_names
+
     async def get_messages(
         self,
         entity: Any,
