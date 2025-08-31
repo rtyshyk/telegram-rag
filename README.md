@@ -1,13 +1,90 @@
 # Telegram RAG Chat
 
-Personal, Dockerized RA- **Auto-deploy Vespa `application.zip` on container start; fail fast on schema mismatch**
+Personal, Dockerized RAG system for searching and chatting with your Telegram message history.
+
+## Features
+
+- **Phase 1**: Web app with hybrid search (BM25 + vector similarity)
+- **Phase 2**: Telegram indexing with chunking and embeddings
+- **Phase 3**: Production-ready hybrid search pipeline
+- **Phase 4**: RAG Chat with Citations ✨ **NEW**
+
+### Phase 4 - RAG Chat
+
+The latest addition provides AI-powered question answering using your indexed Telegram data:
+
+- **Grounded responses**: AI answers strictly from your Telegram messages
+- **Citation tracking**: Each statement links back to specific messages
+- **Smart context assembly**: Automatically selects and compresses relevant chunks
+- **Model selection**: Choose between GPT models via UI
+- **Rate limiting**: Built-in protection against excessive usage
+- **Real-time search**: Live search results as you type
+
+**Auto-deploy Vespa `application.zip` on container start; fail fast on schema mismatch**
 
 ## Commands
 
-Index chat
+### Indexing
+
+Index chat messages:
 
 ```
+# Index all available chats
+docker compose run --rm indexer python main.py --once --days 30 --limit-messages 50
+
+# Index specific chats only
 docker compose run --rm indexer python main.py --once --chats '<Saved Messages>' --days 30 --limit-messages 50
+```
+
+### Chat API
+
+The chat endpoint provides RAG-powered question answering:
+
+```bash
+# Basic chat request
+curl -X POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -b cookies.txt \
+  -d '{"q":"What database connection string did we agree on?","k":12}'
+
+# With filters and model selection
+curl -X POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -b cookies.txt \
+  -d '{
+    "q": "How do we handle authentication?",
+    "k": 15,
+    "model_label": "gpt 5",
+    "filters": {
+      "chat_ids": ["-123456789"],
+      "date_from": "2025-08-01"
+    },
+    "debug": true
+  }'
+```
+
+**Response format:**
+
+```json
+{
+  "answer": "Use postgres://user:pass@db:5432/app [1]\n\nSources:\n[1] Work Chat — 2025-08-12 09:41 — message 7741",
+  "citations": [
+    {
+      "id": "msg:7741:0",
+      "chat_id": "-123456789",
+      "message_id": 7741,
+      "chunk_idx": 0,
+      "source_title": "Work Chat",
+      "message_date": 1723452060
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1812,
+    "completion_tokens": 112,
+    "total_tokens": 1924
+  },
+  "timing_ms": 2105
+}
 ```
 
 ---
@@ -364,6 +441,19 @@ pre-commit run prettier     # Markdown/JSON formatting
 pre-commit run shfmt        # Shell script formatting
 ```
 
+**VS Code Integration:**
+
+Pre-commit hooks can be run directly from VS Code using tasks:
+
+- **Command Palette**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Pre-commit: Run all hooks"
+- **Keyboard Shortcut**: `Cmd+Shift+P` (macOS) to run all hooks
+- **Available Tasks**:
+  - `Pre-commit: Run all hooks` - Run all hooks on all files
+  - `Pre-commit: Run on staged files` - Run hooks only on staged files
+  - `Pre-commit: Run specific hook (black)` - Run only Python formatting
+  - `Pre-commit: Run specific hook (prettier)` - Run only JS/TS/Markdown formatting
+  - `Pre-commit: Install hooks` - Install pre-commit hooks
+
 **Hooks configured:**
 - `black` - Python code formatting
 - `prettier` - Markdown, JSON, YAML formatting
@@ -432,7 +522,7 @@ pre-commit run shfmt        # Shell script formatting
 - **Can’t login** → verify `APP_USER` and `APP_USER_HASH_BCRYPT`; check time drift for cookie expiry.
 - **Indexer stalls** → confirm Telethon session exists on volume; check rate-limit backoff logs.
 - **No search results** → ensure Vespa app deployed (container logs) and embeddings present.
-- **Rerank skipped** → set `COHERE_API_KEY` and `RERANK_ENABLED=true`.
+- **Rerank skipped** → set `COHERE_API_KEY` and `RERANK_ENABLED=true`.2
 
 ---
 

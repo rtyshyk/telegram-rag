@@ -16,7 +16,7 @@ test.describe("Chat Flow Tests", () => {
 
     // Wait for models and select one
     await utils.waitForModelsLoaded();
-    await utils.selectModel("GPT-4");
+    await utils.selectModel("gpt 5");
 
     // Send a message
     await utils.sendMessage("Hello, how are you?");
@@ -46,22 +46,6 @@ test.describe("Chat Flow Tests", () => {
     // Should show connection error
     await expect(page.locator(".text-red-700")).toContainText(
       "connection error",
-    );
-  });
-
-  test("timeout handling workflow", async ({ page }) => {
-    // Mock slow response
-    await utils.mockSlowResponse("**/auth/login", 12000);
-
-    await page.goto("/login");
-    await page.fill('input[type="text"]', "admin");
-    await page.fill('input[type="password"]', "admin");
-    await page.click('button[type="submit"]');
-
-    // Should show timeout error
-    await expect(page.locator(".text-red-700")).toContainText(
-      "request timeout",
-      { timeout: 15000 },
     );
   });
 

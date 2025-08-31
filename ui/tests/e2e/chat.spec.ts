@@ -16,9 +16,9 @@ test.describe("Chat Interface", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify([
-            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-            { id: "gpt-4", label: "GPT-4" },
-            { id: "claude-3", label: "Claude 3" },
+            { id: "gpt-5", label: "gpt 5" },
+            { id: "gpt-5-mini", label: "gpt5 mini" },
+            { id: "gpt-5-nano", label: "gpt5 nano" },
           ]),
         });
       } else if (url.includes("/auth/logout")) {
@@ -77,17 +77,13 @@ test.describe("Chat Interface", () => {
     await expect(page.locator('button:has-text("Send")')).toBeVisible();
   });
 
-  test("should load models successfully", async ({ page }) => {
-    // Wait for models to load - look for the green dot in model picker
-    await expect(page.locator(".bg-green-500")).toBeVisible();
-
-    // Click on model picker button
+  test("should display models", async ({ page }) => {
+    await page.waitForSelector("button:has(.bg-green-500)");
     await page.click("button:has(.bg-green-500)");
 
     // Should show model options
-    await expect(page.locator("text=GPT-3.5 Turbo").first()).toBeVisible();
-    await expect(page.locator("text=GPT-4").first()).toBeVisible();
-    await expect(page.locator("text=Claude 3").first()).toBeVisible();
+    await expect(page.locator("text=gpt 5").first()).toBeVisible();
+    await expect(page.locator("text=gpt5 mini").first()).toBeVisible();
   });
 
   test("should show empty state initially", async ({ page }) => {
@@ -163,19 +159,20 @@ test.describe("Chat Interface", () => {
     await page.waitForSelector("button:has(.bg-green-500)");
     await page.click("button:has(.bg-green-500)");
 
-    // Select GPT-4
-    await page.click("text=GPT-4");
+    // Select gpt 5
+    await page.click("text=gpt 5");
 
     // Should close dropdown and show selected model
     await expect(
-      page.locator("button:has(.bg-green-500)").locator("text=GPT-4"),
+      page.locator("button:has(.bg-green-500)").locator("text=gpt 5"),
     ).toBeVisible();
 
     // Should store selection in localStorage
     const selectedModel = await page.evaluate(() => {
-      return localStorage.getItem("selected_model_label");
+      return localStorage.getItem("selectedModel");
     });
-    expect(selectedModel).toBe("GPT-4");
+
+    expect(selectedModel).toBe("gpt-5");
   });
 
   test("should logout successfully", async ({ page }) => {

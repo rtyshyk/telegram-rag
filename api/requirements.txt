@@ -6,5 +6,6 @@ PyJWT
 pydantic-settings
 httpx
 openai
+tiktoken
 pytest
 pytest-asyncio

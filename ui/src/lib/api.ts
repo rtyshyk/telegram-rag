@@ -58,15 +58,12 @@ export async function search(
   if (opts.chatId) payload.chat_id = opts.chatId;
   if (typeof opts.threadId === "number") payload.thread_id = opts.threadId;
   if (typeof opts.hybrid === "boolean") payload.hybrid = opts.hybrid;
-  const res = await fetch(
-    `${API_BASE}/search`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(payload),
-    },
-  );
+  const res = await fetch(`${API_BASE}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
   if (res.status === 401) {
     // Redirect to login if unauthorized
     window.location.href = "/login";
@@ -76,4 +73,117 @@ export async function search(
   const data = await res.json();
   if (!data.ok) return [];
   return data.results as SearchResult[];
+}
+
+export interface ChatFilters {
+  chat_ids?: string[];
+  date_from?: string;
+  date_to?: string;
+  thread_id?: number;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatCitation {
+  id: string;
+  chat_id: string;
+  message_id: number;
+  chunk_idx: number;
+  source_title?: string;
+  message_date?: number;
+}
+
+export interface ChatUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd?: number;
+}
+
+export interface ChatStreamChunk {
+  type:
+    | "search"
+    | "reformulate"
+    | "start"
+    | "content"
+    | "citations"
+    | "usage"
+    | "end"
+    | "error";
+  content?: string;
+  citations?: ChatCitation[];
+  usage?: ChatUsage;
+  timing_seconds?: number;
+  search_results_count?: number;
+  reformulated_query?: string;
+}
+
+export async function* chatStream(
+  q: string,
+  opts: {
+    k?: number;
+    model_id?: string;
+    filters?: ChatFilters;
+    use_current_filters?: boolean;
+    history?: ChatMessage[];
+  } = {},
+): AsyncGenerator<ChatStreamChunk, void, unknown> {
+  const payload: any = {
+    q,
+    k: opts.k ?? 12,
+    model_id: opts.model_id,
+    filters: opts.filters,
+    use_current_filters: opts.use_current_filters ?? true,
+    history: opts.history,
+  };
+
+  const res = await fetch(`${API_BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Chat failed: ${res.status} ${errorText}`);
+  }
+
+  if (!res.body) {
+    throw new Error("No response body");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            yield data as ChatStreamChunk;
+          } catch (e) {
+            console.warn("Failed to parse SSE data:", line);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }

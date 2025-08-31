@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .auth import (
     AuthMiddleware,
@@ -9,6 +9,8 @@ from .auth import (
     record_attempt,
     verify_password,
 )
+from .chat import ChatRequest, get_chat_service
+from .models import get_available_models
 from .settings import settings
 from .search import SearchRequest, get_search_client
 
@@ -90,11 +92,7 @@ async def logout(response: Response):
 
 @app.get("/models")
 async def models() -> list[dict[str, str]]:
-    return [
-        {"label": "gpt 5", "id": "gpt-5"},
-        {"label": "gpt5 mini", "id": "gpt-5-mini"},
-        {"label": "gpt5 nano", "id": "gpt-5-nano"},
-    ]
+    return get_available_models()
 
 
 @app.post("/search")
@@ -102,3 +100,32 @@ async def search(req: SearchRequest):
     client = await get_search_client()
     results = await client.search(req)
     return {"ok": True, "results": [r.model_dump() for r in results]}
+
+
+@app.post("/chat")
+async def chat(req: ChatRequest, request: Request):
+    """Chat endpoint with RAG capabilities (streaming only)."""
+    try:
+        user_id = "default_user"
+        chat_service = await get_chat_service()
+
+        # Always return streaming response
+        return StreamingResponse(
+            chat_service.chat_stream(req, user_id),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+            },
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (rate limiting, etc.)
+        raise
+    except Exception as e:
+        # Log unexpected errors
+        import logging
+
+        logging.getLogger(__name__).error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail="internal_error")

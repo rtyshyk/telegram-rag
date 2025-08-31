@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     embed_model: str = "text-embedding-3-large"
     embed_dimensions: int = 3072
     vespa_endpoint: str = "http://vespa:8080"
+    # Chat
+    chat_default_k: int = 50
+    chat_max_context_tokens: int = 50000
+    chat_rate_limit_rpm: int = 30
 
 
 settings = Settings()
