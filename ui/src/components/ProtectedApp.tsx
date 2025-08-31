@@ -119,6 +119,8 @@ export default function ProtectedApp() {
   const [chatError, setChatError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
+  // Monotonic sequence to avoid race conditions between overlapping searches
+  const searchSeqRef = useRef(0);
 
   const scrollToBottom = () => {
     const el = messagesEndRef.current;
@@ -135,28 +137,114 @@ export default function ProtectedApp() {
     scrollToBottom();
   }, [messages]);
 
-  const runSearch = async (q: string) => {
-    if (!q.trim()) {
-      setSearchResults([]);
-      setCurrentSearchQuery("");
+  // Aggregate multiple chunk results for the same (chat_id, message_id) into a single full message
+  const aggregateSearchResults = (results: SearchResult[]): SearchResult[] => {
+    if (!results || results.length === 0) return [];
+
+    // Preserve original ordering priority by first occurrence (already ranked by backend)
+    const groups = new Map<
+      string,
+      {
+        base: SearchResult;
+        parts: {
+          idx: number;
+          text: string;
+          chunk_idx: number;
+          score: number;
+        }[];
+        maxScore: number;
+      }
+    >();
+
+    const headerRegex = /^\[[^\]]+\]\n\n?/; // matches leading header like [2025-08-31 10:00 • Alice]
+
+    results.forEach((r, orderIdx) => {
+      const key = `${r.chat_id}:${r.message_id}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          base: { ...r, id: key, chunk_idx: 0 },
+          parts: [],
+          maxScore: r.score,
+        });
+      }
+      const g = groups.get(key)!;
+      g.maxScore = Math.max(g.maxScore, r.score);
+      // Extract chunk body (remove duplicated header after first chunk)
+      let text = r.text || "";
+      // For non-first chunk in a message, strip header if present to avoid repetition
+      if (g.parts.length > 0) {
+        text = text.replace(headerRegex, "").trimStart();
+      }
+      g.parts.push({
+        idx: orderIdx,
+        text,
+        chunk_idx: r.chunk_idx,
+        score: r.score,
+      });
+    });
+
+    // Build aggregated messages keeping original ordering by first appearance
+    const aggregated: SearchResult[] = [];
+    for (const [, g] of groups) {
+      // Sort parts by chunk_idx ascending to reconstruct message
+      g.parts.sort((a, b) => a.chunk_idx - b.chunk_idx);
+      const fullText = g.parts
+        .map((p) => p.text)
+        .join("\n")
+        .trim();
+      aggregated.push({
+        ...g.base,
+        text: fullText,
+        score: g.maxScore, // represent best score among chunks
+        chunk_idx: 0,
+      });
+    }
+
+    // Order aggregated messages by their highest score (desc), tie-break by message_id
+    aggregated.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.chat_id === b.chat_id) return a.message_id - b.message_id;
+      return a.chat_id.localeCompare(b.chat_id);
+    });
+    return aggregated;
+  };
+
+  const runSearch = async (
+    q: string,
+    opts: { preserveOnEmpty?: boolean } = {},
+  ) => {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      if (!opts.preserveOnEmpty) {
+        // User manually cleared input: clear panel
+        setSearchResults([]);
+        setCurrentSearchQuery("");
+      }
       return;
     }
+
+    const seq = ++searchSeqRef.current; // capture sequence id
     setSearchLoading(true);
     setSearchError(null);
     try {
-      const results = await search(q, { limit: 6, hybrid: true });
-      setSearchResults(results);
-      setCurrentSearchQuery(q);
+      const results = await search(trimmed, { limit: 12, hybrid: true });
+      // Ignore if a newer search started meanwhile
+      if (seq !== searchSeqRef.current) return;
+      const aggregated = aggregateSearchResults(results);
+      setSearchResults(aggregated);
+      setCurrentSearchQuery(trimmed);
     } catch (err: any) {
+      if (seq !== searchSeqRef.current) return; // stale
       setSearchError(err?.message || "Search failed");
     } finally {
-      setSearchLoading(false);
+      if (seq === searchSeqRef.current) setSearchLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!input.trim()) return; // keep prior results if input cleared after send
     const h = setTimeout(() => {
-      runSearch(input);
+      runSearch(input, { preserveOnEmpty: false });
     }, 350);
     return () => clearTimeout(h);
   }, [input]);
@@ -178,6 +266,13 @@ export default function ProtectedApp() {
     let assistantAdded = false;
 
     setMessages((prev) => [...prev, userMessage]);
+
+    // Update search panel to show relevant full messages for the just-sent query (before clearing input)
+    try {
+      await runSearch(message, { preserveOnEmpty: true });
+    } catch {
+      // ignore search errors here; main chat flow continues
+    }
     setInput("");
 
     // Extract conversation history
@@ -235,6 +330,9 @@ export default function ProtectedApp() {
           }
         } else if (chunk.type === "citations") {
           if (chunk.citations) finalCitations = chunk.citations;
+          // Fire a search using the (possibly) reformulated query so the side panel reflects actual context
+          const qForPanel = reformulatedQuery.trim() || message;
+          runSearch(qForPanel, { preserveOnEmpty: true });
         } else if (chunk.type === "end") {
           if (chunk.usage) finalUsage = chunk.usage;
           if (chunk.timing_seconds) finalTiming = chunk.timing_seconds;
@@ -271,6 +369,9 @@ export default function ProtectedApp() {
               ),
             );
           }
+          // Ensure final panel populated even if no citations chunk arrived earlier
+          const qForPanel = reformulatedQuery.trim() || message;
+          runSearch(qForPanel, { preserveOnEmpty: true });
         } else if (chunk.type === "error") {
           throw new Error(chunk.content || "Unknown streaming error");
         }
@@ -691,10 +792,12 @@ export default function ProtectedApp() {
                 </button>
               </div>
             )}
-            {!searchLoading && searchResults.length === 0 && input.trim() && (
-              <div className="text-gray-400">No matches yet.</div>
-            )}
-            {!input.trim() && (
+            {!searchLoading &&
+              searchResults.length === 0 &&
+              currentSearchQuery.trim() && (
+                <div className="text-gray-400">No matches yet.</div>
+              )}
+            {!currentSearchQuery.trim() && searchResults.length === 0 && (
               <div className="text-gray-400">
                 Type to search indexed messages…
               </div>
