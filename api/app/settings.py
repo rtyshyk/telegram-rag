@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     chat_default_k: int = 50
     chat_max_context_tokens: int = 50000
     chat_rate_limit_rpm: int = 30
+    # Chat decision models (separate from user-selected model)
+    chat_search_decision_model: str = "gpt-5-mini"
+    chat_reformulation_model: str = "gpt-5-mini"
 
 
 settings = Settings()

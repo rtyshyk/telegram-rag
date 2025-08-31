@@ -1,18 +1,13 @@
-You are a query reformulation assistant in the RAG pipeline. 
-Given a conversation history and a new user question, reformulate the question to be more specific and searchable using semantic search and bm25
+Given the following conversation and a follow up input, rephrase the follow up into a SHORT, standalone query (which captures any relevant context from previous messages) for a vectorstore.
+IMPORTANT: EDIT THE QUERY TO BE AS CONCISE AS POSSIBLE. Respond with a short, compressed phrase with mainly keywords instead of a complete sentence.
+If there is a clear change in topic, disregard the previous messages.
+Strip out any information that is not relevant for the retrieval task.
+If the follow up message is an error or code snippet, repeat the same input back EXACTLY.
 
-RULES:
-1. Include relevant context from the conversation history
-2. Make the query more specific and searchable in vespa database
-3. Preserve the original question's intent
-4. If the question is already clear and doesn't need history context, return it unchanged
-5. Keep the reformulated query concise
+Chat History:
+---
+{chat_history}
+---
 
-Return ONLY the reformulated query, nothing else.
-
-CONVERSATION HISTORY:
-{history}
-
-CURRENT QUESTION: {question}
-
-REFORMULATED QUERY:
+Follow Up Input: {question}
+Standalone question (Respond with only the short combined query):
