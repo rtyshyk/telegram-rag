@@ -28,7 +28,9 @@ def mock_openai_client():
 @pytest.fixture
 def chat_service(mock_openai_client):
     # Patch settings & search client creation inside ChatService initialization
-    with patch("app.chat.get_search_client"), patch("app.chat.settings") as mock_settings:
+    with patch("app.chat.get_search_client"), patch(
+        "app.chat.settings"
+    ) as mock_settings:
         mock_settings.chat_max_context_tokens = 50000
         mock_settings.openai_api_key = "test-key"
 

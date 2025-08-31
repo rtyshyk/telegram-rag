@@ -70,7 +70,7 @@ class ChatStreamChunk(BaseModel):
 
     type: str = Field(
         ...,
-        description="Type of chunk: 'search', 'reformulate', 'start', 'content', 'citations', 'usage', 'end'",
+        description="Type of chunk: 'search_decision', 'search', 'reformulate', 'start', 'content', 'citations', 'usage', 'end'",
     )
     content: Optional[str] = Field(
         default=None, description="Content for content chunks"
@@ -234,9 +234,7 @@ class QueryReformulator:
         except Exception as e:
             raise RuntimeError(f"Failed to load reformulation prompt: {e}") from e
 
-    async def reformulate_query(
-        self, question: str, history: List[ChatMessage], model: str
-    ) -> str:
+    async def reformulate_query(self, question: str, history: List[ChatMessage]) -> str:
         """Reformulate a query based on conversation history."""
         if not history or len(history) == 0:
             return question
@@ -254,24 +252,84 @@ class QueryReformulator:
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model=model,
+                model=settings.chat_reformulation_model,
                 messages=[
                     {
                         "role": "user",
                         "content": self.reformulation_prompt.format(
-                            history=history_str, question=question
+                            chat_history=history_str, question=question
                         ),
                     }
                 ],
             )
 
             reformulated = response.choices[0].message.content.strip()
-            # Fallback to original if reformulation failed
-            return reformulated if reformulated else question
+            if not reformulated:
+                raise ValueError("Reformulation returned empty response")
+            return reformulated
 
         except Exception as e:
-            logger.warning(f"Query reformulation failed: {e}")
-            return question
+            logger.error(f"Query reformulation failed: {e}")
+            raise RuntimeError(f"Failed to reformulate query: {str(e)}") from e
+
+
+class SearchDecisionMaker:
+    """Determines whether to perform search based on conversation context."""
+
+    def __init__(self, openai_client: AsyncOpenAI):
+        self.openai_client = openai_client
+        # Load search decision prompt from external file
+        prompt_path = Path(__file__).parent / "prompts" / "search_decision_prompt.txt"
+        if not prompt_path.exists():
+            raise FileNotFoundError(
+                f"Search decision prompt file not found: {prompt_path}. Create the file or disable search decisions."
+            )
+        try:
+            self.search_decision_prompt = prompt_path.read_text().strip()
+            if not self.search_decision_prompt:
+                raise ValueError("Search decision prompt file is empty")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load search decision prompt: {e}") from e
+
+    async def should_search(self, question: str, history: List[ChatMessage]) -> bool:
+        """Determine if search should be performed based on conversation context."""
+        if not history or len(history) == 0:
+            return True  # Always search when no history
+
+        # Format history for the prompt
+        history_text = []
+        for msg in history[-8:]:  # Use last 8 messages for context
+            role = "User" if msg.role == "user" else "Assistant"
+            history_text.append(f"{role}: {msg.content}")
+
+        history_str = (
+            "\n".join(history_text) if history_text else "No conversation history"
+        )
+
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model=settings.chat_search_decision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": self.search_decision_prompt.format(
+                            chat_history=history_str, question=question
+                        ),
+                    }
+                ],
+            )
+
+            decision = response.choices[0].message.content.strip().upper()
+            should_search = decision != "SKIP_SEARCH"
+
+            logger.debug(
+                f"Search decision for '{question[:50]}...': {decision} -> {should_search}"
+            )
+            return should_search
+
+        except Exception as e:
+            logger.error(f"Search decision failed: {e}")
+            raise RuntimeError(f"Failed to make search decision: {str(e)}") from e
 
 
 class ChatService:
@@ -288,9 +346,10 @@ class ChatService:
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
 
-        # Initialize cost estimator and query reformulator
+        # Initialize cost estimator, query reformulator, and search decision maker
         self.cost_estimator = ChatCostEstimator()
         self.query_reformulator = QueryReformulator(self.openai_client)
+        self.search_decision_maker = SearchDecisionMaker(self.openai_client)
 
     def _load_system_prompt(self) -> str:
         """Load system prompt from file."""
@@ -332,13 +391,29 @@ class ChatService:
         try:
             model_id = self._resolve_model_id(request.model_id)
 
-            # Query reformulation phase
-            reformulated_query = request.q
+            # Search decision phase
+            should_search = True
             if request.history and len(request.history) > 0:
+                yield f"data: {ChatStreamChunk(type='search_decision', content='Analyzing if search is needed...').model_dump_json()}\n\n"
+
+                should_search = await self.search_decision_maker.should_search(
+                    request.q, request.history
+                )
+
+                if not should_search:
+                    decision_chunk = ChatStreamChunk(
+                        type="search_decision",
+                        content="Using conversation context to answer",
+                    )
+                    yield f"data: {decision_chunk.model_dump_json()}\n\n"
+
+            # Query reformulation phase (only if we'll search)
+            reformulated_query = request.q
+            if should_search and request.history and len(request.history) > 0:
                 yield f"data: {ChatStreamChunk(type='reformulate', content='Analyzing conversation context...').model_dump_json()}\n\n"
 
                 reformulated_query = await self.query_reformulator.reformulate_query(
-                    request.q, request.history, model_id
+                    request.q, request.history
                 )
 
                 if reformulated_query != request.q:
@@ -349,21 +424,23 @@ class ChatService:
                     )
                     yield f"data: {reformulate_chunk.model_dump_json()}\n\n"
 
-            # Search phase
-            yield f"data: {ChatStreamChunk(type='search', content='Searching your Telegram data...').model_dump_json()}\n\n"
+            # Search phase (only if needed)
+            search_results = []
+            if should_search:
+                yield f"data: {ChatStreamChunk(type='search', content='Searching your Telegram data...').model_dump_json()}\n\n"
 
-            search_client = await get_search_client()
-            search_request = self._build_search_request(request, reformulated_query)
-            search_results = await search_client.search(search_request)
+                search_client = await get_search_client()
+                search_request = self._build_search_request(request, reformulated_query)
+                search_results = await search_client.search(search_request)
 
-            search_chunk = ChatStreamChunk(
-                type="search",
-                content=f"Found {len(search_results)} relevant messages",
-                search_results_count=len(search_results),
-            )
-            yield f"data: {search_chunk.model_dump_json()}\n\n"
+                search_chunk = ChatStreamChunk(
+                    type="search",
+                    content=f"Found {len(search_results)} relevant messages",
+                    search_results_count=len(search_results),
+                )
+                yield f"data: {search_chunk.model_dump_json()}\n\n"
 
-            if not search_results:
+            if should_search and not search_results:
                 # No context found
                 no_data_chunk = ChatStreamChunk(
                     type="content",
@@ -385,9 +462,12 @@ class ChatService:
                 yield f"data: {end_chunk.model_dump_json()}\n\n"
                 return
 
-            # Assemble context
+            # Assemble context (if search was performed)
             assembler = ContextAssembler(model_id)
-            context, selected_indices = assembler.assemble_context(search_results)
+            context = ""
+            selected_indices = []
+            if should_search and search_results:
+                context, selected_indices = assembler.assemble_context(search_results)
 
             # Prepare messages with history
             current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -406,11 +486,16 @@ class ChatService:
                 for msg in history_to_include:
                     messages.append({"role": msg.role, "content": msg.content})
 
-            # Add current question with context
+            # Add current question with context (if available)
+            if context:
+                user_content = f"CONTEXT:\n{context}\n\nQUESTION: {reformulated_query}"
+            else:
+                user_content = reformulated_query
+
             messages.append(
                 {
                     "role": "user",
-                    "content": f"CONTEXT:\n{context}\n\nQUESTION: {reformulated_query}",
+                    "content": user_content,
                 }
             )
 
@@ -537,20 +622,21 @@ class ChatService:
                 except Exception as e:
                     logger.warning(f"Manual usage estimation failed: {e}")
 
-            # Build citations
+            # Build citations (only if we performed search)
             citations = []
-            for i, orig_idx in enumerate(selected_indices):
-                result = search_results[orig_idx]
-                citations.append(
-                    ChatCitation(
-                        id=result.id,
-                        chat_id=result.chat_id,
-                        message_id=result.message_id,
-                        chunk_idx=result.chunk_idx,
-                        source_title=result.source_title,
-                        message_date=result.message_date,
+            if should_search and search_results:
+                for i, orig_idx in enumerate(selected_indices):
+                    result = search_results[orig_idx]
+                    citations.append(
+                        ChatCitation(
+                            id=result.id,
+                            chat_id=result.chat_id,
+                            message_id=result.message_id,
+                            chunk_idx=result.chunk_idx,
+                            source_title=result.source_title,
+                            message_date=result.message_date,
+                        )
                     )
-                )
 
             # Send citations
             citations_chunk = ChatStreamChunk(type="citations", citations=citations)
