@@ -6,26 +6,54 @@ interface Model {
   id: string;
 }
 
-export default function ModelPicker() {
+interface ModelPickerProps {
+  onModelChange?: (modelId: string) => void;
+  value?: string;
+}
+
+export default function ModelPicker({
+  onModelChange,
+  value,
+}: ModelPickerProps) {
   const [models, setModels] = useState<Model[]>([]);
-  const [selected, setSelected] = useState<string>("");
+  const [selected, setSelected] = useState<string>(value || "");
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     fetchModels()
       .then((data) => {
         setModels(data);
-        const stored = localStorage.getItem("selected_model_label");
-        setSelected(stored || data[0]?.label || "");
+        if (!value) {
+          const stored = localStorage.getItem("selected_model_id");
+          const initialModel = stored || data[0]?.id || "";
+          setSelected(initialModel);
+          if (onModelChange && initialModel) {
+            onModelChange(initialModel);
+          }
+        }
       })
       .catch((res) => {
         if (res.status === 401) window.location.href = "/login";
       });
-  }, []);
+  }, [value, onModelChange]);
 
   useEffect(() => {
-    if (selected) localStorage.setItem("selected_model_label", selected);
+    if (value !== undefined) {
+      setSelected(value);
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (selected) localStorage.setItem("selected_model_id", selected);
   }, [selected]);
+
+  const handleModelSelect = (modelId: string) => {
+    setSelected(modelId);
+    setIsOpen(false);
+    if (onModelChange) {
+      onModelChange(modelId);
+    }
+  };
 
   if (!models.length) {
     return (
@@ -36,7 +64,7 @@ export default function ModelPicker() {
     );
   }
 
-  const selectedModel = models.find((m) => m.label === selected);
+  const selectedModel = models.find((m) => m.id === selected);
 
   return (
     <div className="relative">
@@ -78,12 +106,9 @@ export default function ModelPicker() {
                 {models.map((model) => (
                   <button
                     key={model.id}
-                    onClick={() => {
-                      setSelected(model.label);
-                      setIsOpen(false);
-                    }}
+                    onClick={() => handleModelSelect(model.id)}
                     className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
-                      selected === model.label
+                      selected === model.id
                         ? "bg-blue-50 text-blue-700 font-medium"
                         : "text-gray-700 hover:bg-gray-50"
                     }`}
@@ -91,13 +116,11 @@ export default function ModelPicker() {
                     <div className="flex items-center gap-2">
                       <div
                         className={`w-2 h-2 rounded-full ${
-                          selected === model.label
-                            ? "bg-blue-500"
-                            : "bg-gray-300"
+                          selected === model.id ? "bg-blue-500" : "bg-gray-300"
                         }`}
                       ></div>
                       <span>{model.label}</span>
-                      {selected === model.label && (
+                      {selected === model.id && (
                         <svg
                           className="w-4 h-4 ml-auto text-blue-500"
                           fill="currentColor"

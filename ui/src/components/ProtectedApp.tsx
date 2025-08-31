@@ -1,12 +1,30 @@
 import React, { useState, useRef, useEffect } from "react";
 import ModelPicker from "./ModelPicker";
-import { logout, search, SearchResult } from "../lib/api";
+import {
+  logout,
+  search,
+  SearchResult,
+  chatStream,
+  ChatCitation,
+  ChatStreamChunk,
+  ChatMessage,
+  ChatUsage,
+} from "../lib/api";
 
 interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
+  citations?: ChatCitation[];
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  };
+  timing_seconds?: number;
+  reformulated_query?: string;
 }
 
 const formatDate = (timestamp?: number) => {
@@ -19,7 +37,6 @@ const formatDate = (timestamp?: number) => {
     minute: "2-digit",
   });
 };
-
 const formatTelegramLink = (
   chatId: string,
   messageId: number,
@@ -92,11 +109,14 @@ export default function ProtectedApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(true);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [chatError, setChatError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
 
@@ -141,53 +161,156 @@ export default function ProtectedApp() {
     return () => clearTimeout(h);
   }, [input]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleSend = async (message: string) => {
+    if (!message.trim() || isLoading) return;
 
+    setIsLoading(true);
+    setChatError(null);
+
+    // Add only the user message now; delay assistant bubble until first content token
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: input.trim(),
       role: "user",
+      content: message,
       timestamp: new Date(),
     };
+    const assistantMessageId = (Date.now() + 1).toString();
+    let assistantAdded = false;
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setIsLoading(true);
 
-    // Ensure we have search results for the sent message even if user pressed Enter before debounce fired
-    (async () => {
-      if (currentSearchQuery !== userMessage.content) {
-        try {
-          await runSearch(userMessage.content);
-        } catch {
-          // ignore search error here; UI panel already reflects any error
+    // Extract conversation history
+    const history = messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    try {
+      let fullContent = "";
+      let finalCitations: ChatCitation[] = [];
+      let finalUsage: ChatUsage | undefined;
+      let finalTiming: number | undefined;
+      let reformulatedQuery = "";
+
+      console.log("Starting chat stream with history:", history);
+
+      for await (const chunk of chatStream(message, {
+        model_id: selectedModel,
+        history: history,
+      })) {
+        console.log("Received chunk:", chunk);
+
+        if (chunk.type === "reformulate") {
+          if (chunk.reformulated_query) {
+            reformulatedQuery = chunk.reformulated_query;
+            console.log("Query reformulated:", reformulatedQuery);
+          }
+        } else if (chunk.type === "content") {
+          if (chunk.content) {
+            // First token: create assistant message and remove typing indicator
+            if (!assistantAdded) {
+              assistantAdded = true;
+              setIsLoading(false); // hide typing indicator once real content starts
+              fullContent = chunk.content;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: assistantMessageId,
+                  role: "assistant",
+                  content: fullContent,
+                  timestamp: new Date(),
+                },
+              ]);
+            } else {
+              fullContent += chunk.content;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: fullContent }
+                    : msg,
+                ),
+              );
+            }
+          }
+        } else if (chunk.type === "citations") {
+          if (chunk.citations) finalCitations = chunk.citations;
+        } else if (chunk.type === "end") {
+          if (chunk.usage) finalUsage = chunk.usage;
+          if (chunk.timing_seconds) finalTiming = chunk.timing_seconds;
+          // Final update with all metadata (may still be empty content)
+          if (!assistantAdded) {
+            // No content streamed; create an (empty) assistant message to attach metadata
+            assistantAdded = true;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: assistantMessageId,
+                role: "assistant",
+                content: fullContent,
+                citations: finalCitations,
+                usage: finalUsage,
+                timing_seconds: finalTiming,
+                reformulated_query: reformulatedQuery,
+                timestamp: new Date(),
+              },
+            ]);
+          } else {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? {
+                      ...msg,
+                      content: fullContent,
+                      citations: finalCitations,
+                      usage: finalUsage,
+                      timing_seconds: finalTiming,
+                      reformulated_query: reformulatedQuery,
+                    }
+                  : msg,
+              ),
+            );
+          }
+        } else if (chunk.type === "error") {
+          throw new Error(chunk.content || "Unknown streaming error");
         }
       }
-      // TODO: Replace with real RAG generation using searchResults
-      setTimeout(() => {
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          content: `This is a simulated response to: "${
-            userMessage.content
-          }".\n\nTop context:\n${searchResults
-            .slice(0, 3)
-            .map(
-              (r, i) =>
-                `${i + 1}. [${(r.score || 0).toFixed(3)}] ${r.text.substring(
-                  0,
-                  200,
-                )}`,
-            )
-            .join("\n")}`,
-          role: "assistant",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-        setIsLoading(false);
-      }, 1000);
-    })();
+
+      // No additional fallback injection; an empty assistant message signals no content was produced
+    } catch (error: any) {
+      setChatError(error?.message || "Chat request failed");
+
+      // Update the assistant message with error content
+      // If assistant message already added, update it; else create error message
+      setMessages((prev) => {
+        const exists = prev.some((m) => m.id === assistantMessageId);
+        if (!exists) {
+          return [
+            ...prev,
+            {
+              id: assistantMessageId,
+              role: "assistant",
+              content: `Error: ${
+                error?.message || "Failed to generate response"
+              }`,
+              timestamp: new Date(),
+            },
+          ];
+        }
+        return prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
+                content: `Error: ${
+                  error?.message || "Failed to generate response"
+                }`,
+              }
+            : msg,
+        );
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -202,13 +325,127 @@ export default function ProtectedApp() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  const formatCitationLink = (citation: ChatCitation) => {
+    return formatTelegramLink(
+      citation.chat_id,
+      citation.message_id,
+      citation.source_title,
+      undefined, // We don't have chat_type in citations
+    );
+  };
+
+  const renderMessageContent = (message: Message) => {
+    // Basic markdown-style rendering for citations
+    let content = message.content;
+
+    // If there are citations, make [n] clickable
+    if (message.citations && message.citations.length > 0 && content) {
+      message.citations.forEach((citation, index) => {
+        const citationNum = index + 1;
+        const regex = new RegExp(`\\[${citationNum}\\]`, "g");
+        content = content.replace(
+          regex,
+          `<span class="text-blue-600 cursor-pointer font-medium underline hover:bg-blue-50 px-1 py-0.5 rounded transition-colors citation-link" data-citation="${index}">[${citationNum}]</span>`,
+        );
+      });
+    }
+
+    return (
+      <div>
+        <div
+          className="text-sm leading-relaxed whitespace-pre-wrap"
+          dangerouslySetInnerHTML={{ __html: content || "" }}
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.classList.contains("citation-link")) {
+              const citationIndex = parseInt(target.dataset.citation || "0");
+              if (message.citations && message.citations[citationIndex]) {
+                const citation = message.citations[citationIndex];
+                window.open(formatCitationLink(citation), "_blank");
+              }
+            }
+          }}
+        />
+
+        {/* Always render styled citations list if citations are available */}
+        {message.citations && message.citations.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="text-xs text-gray-600 mb-2 font-medium">
+              Sources:
+            </div>
+            <div className="space-y-1">
+              {message.citations.map((citation, index) => (
+                <div key={citation.id} className="text-xs text-gray-600">
+                  <button
+                    onClick={() =>
+                      window.open(formatCitationLink(citation), "_blank")
+                    }
+                    className="hover:text-blue-600 hover:underline text-left"
+                  >
+                    [{index + 1}]{" "}
+                    {citation.source_title || `Chat ${citation.chat_id}`} —{" "}
+                    {citation.message_date
+                      ? new Date(
+                          citation.message_date * 1000,
+                        ).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "Unknown date"}{" "}
+                    — message {citation.message_id}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Render usage stats if available */}
+        {message.usage && (
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <div className="text-xs text-gray-500 flex items-center gap-4">
+              <span>🧠 {message.usage.total_tokens} tokens</span>
+              {message.usage.cost_usd && (
+                <span>💰 ${message.usage.cost_usd.toFixed(6)}</span>
+              )}
+              {message.timing_seconds && (
+                <span>⏱️ {message.timing_seconds}s</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Show reformulated query if available */}
+        {message.reformulated_query && (
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <div className="text-xs text-gray-500">
+              <span className="font-medium">Enhanced query:</span>{" "}
+              <span className="italic">"{message.reformulated_query}"</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-semibold text-gray-800">RAG Chat</h1>
-          <ModelPicker />
+          <ModelPicker value={selectedModel} onModelChange={setSelectedModel} />
+          {messages.length > 0 && (
+            <button
+              onClick={() => setMessages([])}
+              className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300"
+            >
+              Clear Chat
+            </button>
+          )}
         </div>
         <button
           onClick={handleLogout}
@@ -261,9 +498,13 @@ export default function ProtectedApp() {
                         : "bg-white border border-gray-200 text-gray-800"
                     }`}
                   >
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content}
-                    </p>
+                    {message.role === "user" ? (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {message.content}
+                      </p>
+                    ) : (
+                      renderMessageContent(message)
+                    )}
                   </div>
                   <div
                     className={`mt-1 px-2 ${
@@ -288,6 +529,33 @@ export default function ProtectedApp() {
             ))
           )}
 
+          {chatError && (
+            <div className="mx-6 mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center gap-2 text-red-700">
+                <svg
+                  className="w-4 h-4"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span className="text-sm font-medium">
+                  Chat Error: {chatError}
+                </span>
+                <button
+                  onClick={() => setChatError(null)}
+                  className="ml-auto text-red-500 hover:text-red-700"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
           {isLoading && (
             <div className="flex justify-start">
               <div className="max-w-[70%] order-1">
@@ -305,7 +573,7 @@ export default function ProtectedApp() {
                       ></div>
                     </div>
                     <span className="text-sm text-gray-500">
-                      AI is thinking...
+                      {loadingPhase || "AI is thinking..."}
                     </span>
                   </div>
                 </div>
@@ -540,7 +808,7 @@ export default function ProtectedApp() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend(e as any);
+                  handleSend(input);
                 }
               }}
               placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
@@ -552,7 +820,7 @@ export default function ProtectedApp() {
           </div>
           <button
             type="button"
-            onClick={(e) => handleSend(e as any)}
+            onClick={() => handleSend(input)}
             disabled={!input.trim() || isLoading}
             className="w-[72px] h-[52px] bg-blue-600 text-white rounded-xl hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1 flex-shrink-0"
           >

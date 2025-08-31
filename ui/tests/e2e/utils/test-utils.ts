@@ -38,9 +38,9 @@ export class TestUtils {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify([
-            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-            { id: "gpt-4", label: "GPT-4" },
-            { id: "claude-3", label: "Claude 3" },
+            { id: "gpt-5", label: "gpt 5" },
+            { id: "gpt-5-mini", label: "gpt5 mini" },
+            { id: "gpt-5-nano", label: "gpt5 nano" },
           ]),
         });
       } else if (url.includes("/auth/logout")) {

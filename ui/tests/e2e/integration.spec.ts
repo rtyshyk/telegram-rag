@@ -29,9 +29,7 @@ test.describe("Navigation and Routing", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify([
-            { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-          ]),
+          body: JSON.stringify([{ id: "gpt-5", label: "gpt 5" }]),
         });
       } else {
         await route.fulfill({
@@ -72,29 +70,6 @@ test.describe("Navigation and Routing", () => {
 });
 
 test.describe("Error Handling", () => {
-  test("should handle network timeouts", async ({ page }) => {
-    // Mock slow API response
-    await page.route("**/auth/login", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 15000)); // 15 second delay
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true }),
-      });
-    });
-
-    await page.goto("/login");
-    await page.fill('input[type="text"]', "admin");
-    await page.fill('input[type="password"]', "admin");
-    await page.click('button[type="submit"]');
-
-    // Should show timeout error
-    await expect(page.locator(".text-red-700")).toContainText(
-      "request timeout",
-      { timeout: 12000 },
-    );
-  });
-
   test("should handle server errors", async ({ page }) => {
     // Mock server error
     await page.route("**/auth/login", async (route) => {

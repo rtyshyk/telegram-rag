@@ -1,0 +1,158 @@
+"""Tests for chat streaming functionality."""
+
+import pytest
+import asyncio
+from unittest.mock import Mock, AsyncMock, patch
+from .chat import ChatService, ChatRequest, ChatStreamChunk
+
+
+class TestChatStream:
+    """Test chat streaming functionality."""
+
+    @pytest.fixture
+    def mock_search_client(self):
+        """Mock search client."""
+        client = Mock()
+        client.search = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def mock_openai_client(self):
+        """Mock OpenAI client."""
+        client = Mock()
+        return client
+
+    @pytest.fixture
+    def chat_service(self, mock_openai_client):
+        """Create ChatService instance with mocked dependencies."""
+        with patch('api.app.chat.get_search_client'), \
+             patch('api.app.chat.settings') as mock_settings:
+            mock_settings.chat_max_context_tokens = 50000
+            mock_settings.openai_api_key = "test-key"
+            
+            service = ChatService()
+            service.openai_client = mock_openai_client
+            return service
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_no_results(self, chat_service, mock_search_client):
+        """Test streaming when no search results found."""
+        with patch('api.app.chat.get_search_client', return_value=mock_search_client):
+            request = ChatRequest(q="test query")
+            
+            chunks = []
+            async for chunk_data in chat_service.chat_stream(request, "test_user"):
+                # Parse the SSE format
+                if chunk_data.startswith("data: "):
+                    import json
+                    chunk = json.loads(chunk_data[6:])
+                    chunks.append(ChatStreamChunk(**chunk))
+            
+            # Should have search, content (no data message), and end chunks
+            assert len(chunks) >= 3
+            
+            # Check chunk types
+            chunk_types = [chunk.type for chunk in chunks]
+            assert "search" in chunk_types
+            assert "content" in chunk_types  # "I don't see this information..."
+            assert "end" in chunk_types
+
+    @pytest.mark.asyncio 
+    async def test_chat_stream_with_openai_response(self, chat_service):
+        """Test streaming with mocked OpenAI response."""
+        # Mock search results
+        mock_search_results = [
+            Mock(
+                id="1", chat_id="-123", message_id=456, chunk_idx=0,
+                source_title="Test Chat", message_date=1234567890,
+                text="Test content for context"
+            )
+        ]
+        
+        # Mock OpenAI streaming response
+        mock_chunks = [
+            Mock(choices=[Mock(delta=Mock(content="Hello"))], usage=None),
+            Mock(choices=[Mock(delta=Mock(content=" world!"))], usage=None),
+            Mock(
+                choices=[Mock(delta=Mock(content=None))], 
+                usage=Mock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+            ),
+        ]
+        
+        async def mock_stream():
+            for chunk in mock_chunks:
+                yield chunk
+        
+        chat_service.openai_client.chat.completions.create = AsyncMock()
+        chat_service.openai_client.chat.completions.create.return_value = mock_stream()
+        
+        with patch('api.app.chat.get_search_client') as mock_get_client, \
+             patch.object(chat_service, '_build_search_request'), \
+             patch('api.app.chat.ContextAssembler') as mock_assembler_class:
+            
+            mock_client = Mock()
+            mock_client.search = AsyncMock(return_value=mock_search_results)
+            mock_get_client.return_value = mock_client
+            
+            mock_assembler = Mock()
+            mock_assembler.assemble_context.return_value = ("context", [0])
+            mock_assembler.count_tokens.return_value = 100
+            mock_assembler_class.return_value = mock_assembler
+            
+            request = ChatRequest(q="test query")
+            
+            chunks = []
+            async for chunk_data in chat_service.chat_stream(request, "test_user"):
+                if chunk_data.startswith("data: "):
+                    import json
+                    chunk = json.loads(chunk_data[6:])
+                    chunks.append(ChatStreamChunk(**chunk))
+            
+            # Should have search, start, content chunks, citations, and end
+            chunk_types = [chunk.type for chunk in chunks]
+            assert "search" in chunk_types
+            assert "start" in chunk_types
+            assert "content" in chunk_types
+            assert "citations" in chunk_types
+            assert "end" in chunk_types
+            
+            # Check content was accumulated
+            content_chunks = [c for c in chunks if c.type == "content"]
+            assert len(content_chunks) >= 2  # "Hello" and " world!"
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_error_handling(self, chat_service):
+        """Test error handling in streaming."""
+        with patch('api.app.chat.get_search_client') as mock_get_client:
+            mock_client = Mock()
+            mock_client.search = AsyncMock(side_effect=Exception("Search error"))
+            mock_get_client.return_value = mock_client
+            
+            request = ChatRequest(q="test query")
+            
+            chunks = []
+            async for chunk_data in chat_service.chat_stream(request, "test_user"):
+                if chunk_data.startswith("data: "):
+                    import json
+                    chunk = json.loads(chunk_data[6:])
+                    chunks.append(ChatStreamChunk(**chunk))
+            
+            # Should have error chunk
+            error_chunks = [c for c in chunks if c.type == "error"]
+            assert len(error_chunks) >= 1
+            assert "error" in error_chunks[0].content.lower()
+
+    def test_chat_stream_chunk_model(self):
+        """Test ChatStreamChunk model validation."""
+        # Test valid chunk
+        chunk = ChatStreamChunk(type="content", content="Hello")
+        assert chunk.type == "content"
+        assert chunk.content == "Hello"
+        
+        # Test chunk with citations
+        chunk = ChatStreamChunk(
+            type="citations", 
+            citations=[{"id": "1", "chat_id": "-123", "message_id": 456, "chunk_idx": 0}]
+        )
+        assert chunk.type == "citations"
+        assert len(chunk.citations) == 1
