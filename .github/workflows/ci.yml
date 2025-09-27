@@ -32,7 +32,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r api/requirements.txt
-      - run: pytest api/tests
+      - name: Run API tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest api/tests -q
 
   indexer-tests:
     runs-on: ubuntu-latest
@@ -55,6 +58,7 @@ jobs:
           VESPA_ENDPOINT: http://localhost:8080
           OPENAI_STUB: "true"
           TELETHON_STUB: "true"
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest indexer/tests -q
 
   ui-tests:
