@@ -33,6 +33,7 @@ class SearchResult(BaseModel):
     rerank_score: Optional[float] = None
     sender: Optional[str] = None
     sender_username: Optional[str] = None
+    chat_username: Optional[str] = None
     message_date: Optional[int] = None
     source_title: Optional[str] = None
     chat_type: Optional[str] = None
@@ -257,6 +258,7 @@ class VespaSearchClient:
                     retrieval_score=base_score,
                     sender=fields.get("sender"),
                     sender_username=fields.get("sender_username"),
+                    chat_username=fields.get("chat_username"),
                     message_date=fields.get("message_date"),
                     source_title=fields.get("source_title"),
                     chat_type=fields.get("chat_type"),

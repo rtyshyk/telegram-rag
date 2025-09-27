@@ -115,10 +115,12 @@ class DatabaseManager:
           deleted_at BIGINT,
           sender TEXT,
           sender_username TEXT,
+          chat_username TEXT,
           chat_type TEXT,
           thread_id BIGINT,
           has_link BOOL DEFAULT FALSE
         );
+        ALTER TABLE chunks ADD COLUMN IF NOT EXISTS chat_username TEXT;
 
         CREATE INDEX IF NOT EXISTS idx_chunks_chat_msg ON chunks(chat_id, message_id);
         CREATE INDEX IF NOT EXISTS idx_chunks_texthash ON chunks(text_hash);
@@ -195,7 +197,7 @@ class DatabaseManager:
             rows = await conn.fetch(
                 """
                 SELECT chunk_id, chat_id, message_id, chunk_idx, text_hash, message_date,
-                       edit_date, deleted_at, sender, sender_username, chat_type, thread_id, has_link
+                       edit_date, deleted_at, sender, sender_username, chat_username, chat_type, thread_id, has_link
                 FROM chunks WHERE chat_id = $1 AND message_id = $2
                 """,
                 chat_id,
@@ -210,14 +212,15 @@ class DatabaseManager:
                 """
                 INSERT INTO chunks (
                     chunk_id, chat_id, message_id, chunk_idx, text_hash, message_date,
-                    edit_date, deleted_at, sender, sender_username, chat_type, thread_id, has_link
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    edit_date, deleted_at, sender, sender_username, chat_username, chat_type, thread_id, has_link
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 ON CONFLICT (chunk_id) DO UPDATE SET
                     text_hash = EXCLUDED.text_hash,
                     edit_date = EXCLUDED.edit_date,
                     deleted_at = EXCLUDED.deleted_at,
                     sender = EXCLUDED.sender,
                     sender_username = EXCLUDED.sender_username,
+                    chat_username = EXCLUDED.chat_username,
                     chat_type = EXCLUDED.chat_type,
                     thread_id = EXCLUDED.thread_id,
                     has_link = EXCLUDED.has_link
@@ -232,6 +235,7 @@ class DatabaseManager:
                 chunk.deleted_at,
                 chunk.sender,
                 chunk.sender_username,
+                chunk.chat_username,
                 chunk.chat_type,
                 chunk.thread_id,
                 chunk.has_link,

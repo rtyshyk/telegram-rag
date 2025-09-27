@@ -37,6 +37,7 @@ class Chunk(BaseModel):
     deleted_at: Optional[int] = None
     sender: Optional[str] = None
     sender_username: Optional[str] = None
+    chat_username: Optional[str] = None
     chat_type: Optional[str] = None
     thread_id: Optional[int] = None
     has_link: bool = False
@@ -52,6 +53,7 @@ class VespaDocument(BaseModel):
     source_title: Optional[str] = None
     sender: Optional[str] = None
     sender_username: Optional[str] = None
+    chat_username: Optional[str] = None
     chat_type: Optional[str] = None
     message_date: int
     edit_date: Optional[int] = None

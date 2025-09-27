@@ -59,6 +59,7 @@ export interface SearchResult {
   score: number;
   sender?: string;
   sender_username?: string;
+  chat_username?: string;
   message_date?: number;
   source_title?: string;
   chat_type?: string;
@@ -116,6 +117,7 @@ export interface ChatCitation {
   chunk_idx: number;
   source_title?: string;
   message_date?: number;
+  chat_username?: string;
 }
 
 export interface ChatUsage {

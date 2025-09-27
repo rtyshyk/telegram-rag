@@ -51,6 +51,7 @@ class VespaClient:
             "source_title": doc.source_title or "",
             "sender": doc.sender or "",
             "sender_username": doc.sender_username or "",
+            "chat_username": doc.chat_username or "",
             "chat_type": doc.chat_type or "",
             "message_date": doc.message_date,
             "edit_date": doc.edit_date,

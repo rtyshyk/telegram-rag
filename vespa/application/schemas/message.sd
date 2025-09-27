@@ -53,6 +53,9 @@ schema message {
     field sender_username type string {
       indexing: attribute | summary
     }
+    field chat_username type string {
+      indexing: attribute | summary
+    }
     field chat_type type string {
       indexing: attribute | summary
     }
