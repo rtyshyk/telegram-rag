@@ -43,6 +43,34 @@ export class TestUtils {
             { id: "gpt-5-nano", label: "gpt5 nano" },
           ]),
         });
+      } else if (url.includes("/chats")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            chats: [
+              {
+                chat_id: "123456789",
+                source_title: "Saved Messages",
+                chat_type: "private",
+                message_count: 50,
+              },
+              {
+                chat_id: "-100987654321",
+                source_title: "Test Supergroup",
+                chat_type: "supergroup",
+                message_count: 150,
+              },
+              {
+                chat_id: "-987654322",
+                source_title: null,
+                chat_type: "group",
+                message_count: 25,
+              },
+            ],
+          }),
+        });
       } else if (url.includes("/auth/logout")) {
         await route.fulfill({
           status: 200,
@@ -57,6 +85,23 @@ export class TestUtils {
           headers: {
             "Set-Cookie": "rag_session=mock-session-token; Path=/; HttpOnly",
           },
+        });
+      } else if (url.includes("/chat")) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const sse = [
+          'data: {"type":"start"}',
+          'data: {"type":"content","content":"Mock response"}',
+          'data: {"type":"end","usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12},"timing_seconds":0.42}',
+          "",
+        ].join("\n\n");
+
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+          body: sse,
         });
       } else if (url.includes("/search")) {
         await route.fulfill({
@@ -114,7 +159,7 @@ export class TestUtils {
   async selectModel(modelName: string) {
     await this.waitForModelsLoaded();
     await this.page.click("button:has(.bg-green-500)");
-    await this.page.click(`text=${modelName}`);
+    await this.page.locator(`button:has-text("${modelName}")`).nth(1).click();
   }
 
   /**

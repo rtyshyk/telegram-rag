@@ -29,7 +29,17 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chrome",
+        /* Start Chrome minimized in headed runs to avoid grabbing focus */
+        launchOptions: {
+          args: [
+            "--start-minimized",
+            "--disable-features=CalculateNativeWinOcclusion",
+          ],
+        },
+      },
     },
   ],
   /* Run your local dev server before starting the tests */
@@ -38,5 +48,8 @@ export default defineConfig({
     url: "http://localhost:4321",
     reuseExistingServer: true, // Always reuse for development
     timeout: 120 * 1000,
+    env: {
+      PUBLIC_API_URL: "http://localhost:8000",
+    },
   },
 });
