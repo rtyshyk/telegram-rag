@@ -38,6 +38,13 @@ class SearchResult(BaseModel):
     has_link: Optional[bool] = None
 
 
+class ChatInfo(BaseModel):
+    chat_id: str
+    source_title: Optional[str] = None
+    chat_type: Optional[str] = None
+    message_count: int = 0
+
+
 class EmbeddingProvider:
     """OpenAI embedding provider."""
 
@@ -100,6 +107,70 @@ class VespaSearchClient:
                 )
             )
         return results
+
+    async def get_available_chats(self) -> List[ChatInfo]:
+        """Get list of available chats with aggregation"""
+        # First get chat counts
+        query = {
+            "yql": "select chat_id from message where true | all(group(chat_id) each(output(count())))",
+            "hits": 0,
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.endpoint}/search/", json=query)
+            response.raise_for_status()
+
+        result = response.json()
+
+        chats = []
+        # Parse aggregation results and get chat IDs
+        chat_data = {}
+        if "root" in result and "children" in result["root"]:
+            for group_list in result["root"]["children"]:
+                if group_list.get("id") == "group:root:0" and "children" in group_list:
+                    for chat_list in group_list["children"]:
+                        if (
+                            chat_list.get("label") == "chat_id"
+                            and "children" in chat_list
+                        ):
+                            for chat_group in chat_list["children"]:
+                                chat_id = chat_group["value"]
+                                count = chat_group["fields"]["count()"]
+                                chat_data[chat_id] = count
+
+        # Now get a sample message from each chat to get source_title
+        for chat_id, count in chat_data.items():
+            title_query = {
+                "yql": f"select source_title from message where chat_id = '{chat_id}'",
+                "hits": 1,
+            }
+
+            async with httpx.AsyncClient() as client:
+                title_response = await client.post(
+                    f"{self.endpoint}/search/", json=title_query
+                )
+                title_response.raise_for_status()
+
+            title_result = title_response.json()
+
+            # Extract source_title from first hit
+            title = f"Chat {chat_id}"  # fallback
+            if (
+                "root" in title_result
+                and "children" in title_result["root"]
+                and len(title_result["root"]["children"]) > 0
+            ):
+                first_hit = title_result["root"]["children"][0]
+                if "fields" in first_hit and "source_title" in first_hit["fields"]:
+                    source_title = first_hit["fields"]["source_title"]
+                    if source_title and source_title.strip():
+                        title = source_title
+
+            chats.append(
+                ChatInfo(chat_id=chat_id, source_title=title, message_count=count)
+            )
+
+        return chats
 
     async def _build_query(
         self, req: SearchRequest

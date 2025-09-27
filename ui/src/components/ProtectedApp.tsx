@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import ModelPicker from "./ModelPicker";
+import ChatSelector from "./ChatSelector";
 import {
   logout,
   search,
@@ -116,6 +117,7 @@ export default function ProtectedApp() {
   const [showContext, setShowContext] = useState(true);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedChat, setSelectedChat] = useState<string>("");
   const [chatError, setChatError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -227,7 +229,11 @@ export default function ProtectedApp() {
     setSearchLoading(true);
     setSearchError(null);
     try {
-      const results = await search(trimmed, { limit: 12, hybrid: true });
+      const searchOpts: any = { limit: 12, hybrid: true };
+      if (selectedChat) {
+        searchOpts.chatId = selectedChat;
+      }
+      const results = await search(trimmed, searchOpts);
       // Ignore if a newer search started meanwhile
       if (seq !== searchSeqRef.current) return;
       const aggregated = aggregateSearchResults(results);
@@ -247,7 +253,7 @@ export default function ProtectedApp() {
       runSearch(input, { preserveOnEmpty: false });
     }, 350);
     return () => clearTimeout(h);
-  }, [input]);
+  }, [input, selectedChat]); // Re-run search when chat selection changes
 
   const handleSend = async (message: string) => {
     if (!message.trim() || isLoading) return;
@@ -290,10 +296,19 @@ export default function ProtectedApp() {
 
       console.log("Starting chat stream with history:", history);
 
-      for await (const chunk of chatStream(message, {
+      // Build chat options with filter
+      const chatOpts: any = {
         model_id: selectedModel,
         history: history,
-      })) {
+      };
+
+      if (selectedChat) {
+        chatOpts.filters = {
+          chat_ids: [selectedChat],
+        };
+      }
+
+      for await (const chunk of chatStream(message, chatOpts)) {
         console.log("Received chunk:", chunk);
 
         if (chunk.type === "reformulate") {
@@ -539,6 +554,7 @@ export default function ProtectedApp() {
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-semibold text-gray-800">RAG Chat</h1>
           <ModelPicker value={selectedModel} onModelChange={setSelectedModel} />
+          <ChatSelector value={selectedChat} onChatChange={setSelectedChat} />
           {messages.length > 0 && (
             <button
               onClick={() => setMessages([])}

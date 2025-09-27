@@ -68,7 +68,10 @@ class TelegramIndexer:
 
     async def run_once(self) -> None:
         """Run one-shot indexing."""
-        logger.info(f"Starting one-shot indexing for {self.args.days} days")
+        if self.args.days is None:
+            logger.info("Starting one-shot indexing for full history")
+        else:
+            logger.info(f"Starting one-shot indexing for {self.args.days} days")
 
         # Get chat list - either from args or all available chats
         chat_list = self.args.get_chat_list()
@@ -93,9 +96,15 @@ class TelegramIndexer:
         if not valid_chats:
             raise ValueError("No valid chats found")
 
-        # Calculate date range
-        since_date = datetime.now() - timedelta(days=self.args.days)
-        logger.info(f"Fetching messages since {since_date.strftime('%Y-%m-%d %H:%M')}")
+        # Calculate date range (None means full history)
+        if self.args.days is None:
+            since_date = None
+            logger.info("Fetching messages for entire available history")
+        else:
+            since_date = datetime.now() - timedelta(days=self.args.days)
+            logger.info(
+                f"Fetching messages since {since_date.strftime('%Y-%m-%d %H:%M')}"
+            )
 
         # Process each chat with global message limit
         total_messages_processed = 0
@@ -397,7 +406,12 @@ def parse_args() -> CLIArgs:
         type=str,
         help="Comma-separated chat names/IDs (optional - defaults to all chats)",
     )
-    parser.add_argument("--days", type=int, default=30, help="Days of history to fetch")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Days of history to fetch (default: entire history)",
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="Estimate costs without calling APIs"
     )

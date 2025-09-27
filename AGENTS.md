@@ -1,125 +1,45 @@
-# GitHub Copilot Instructions
+# Repository Guidelines
 
-Repository: https://github.com/rtyshyk/telegram-rag
+## Project Structure & Modules
 
-## Code Quality Requirements
+- `api/`: FastAPI service (`/auth`, `/models`, `/search`, `/chat`).
+- `indexer/`: Telethon ingestion, chunking, embeddings, Vespa upserts.
+- `ui/`: Astro + React front-end (login, filters, search, chat).
+- `vespa/application/`: Vespa schemas and services; auto-deployed on startup.
+- `scripts/`: Helpers (`deploy-vespa.sh`, `wait_for_health.sh`, `smoke_tests.sh`).
 
-**MANDATORY: After implementing ANY feature, bug fix, or code change, you MUST run formatting and linting tools:**
+## Build, Test, and Dev Commands
 
-```bash
-# Always run before committing
-pre-commit run --all-files
-```
+- `make install`: Create venv and install Python deps for `api` and `indexer`.
+- `make ui-install`: Install UI dependencies.
+- `make precommit`: Run all pre-commit hooks (format/lint).
+- `make test-python`: Run Python tests (`api/tests`, `indexer/tests`).
+- `make test-ui`: Run UI unit tests (vitest). `make test-ui-e2e`: Playwright E2E.
+- Run stack: `docker compose up -d --build` (Vespa app auto-deploys).
 
-## Required Development Workflow
+## Coding Style & Naming
 
-1. **Implement feature/fix**
-2. **Format & lint code** (MANDATORY):
-   ```bash
-   pre-commit run --all-files
-   ```
-3. **Verify all hooks pass** - no exceptions
-4. **Run relevant tests** (MANDATORY) - use VS Code tools, not terminal commands
-5. **Commit with proper formatting**
+- Python: type hints, async I/O where applicable; format with Black.
+- JS/TS/Markdown: Prettier; Shell: shfmt. See `.pre-commit-config.yaml`.
+- Naming: modules/files `snake_case` (Python), scripts `kebab-case`, React components `PascalCase`.
+- Models: keep UI labels stable → "gpt 5"→`gpt-5`, "gpt5 mini"→`gpt-5-mini`, "gpt5 nano"→`gpt-5-nano`.
 
-## Testing Requirements
+## Testing Guidelines
 
-### Always Use VS Code Testing Tools
+- Frameworks: `pytest` (Python), `vitest` (UI), `playwright` (E2E).
+- Use VS Code Test Explorer; mock with `patch()` in tests (avoid global module mocking).
+- Discovery: tests under `api/tests` and `indexer/tests` named `test_*.py`.
+- Before PR: run `make test-python`, `make test-ui`, and optional `scripts/smoke_tests.sh`.
 
-**MANDATORY: Use VS Code built-in testing tools instead of terminal commands:**
+## Commit & PR Guidelines
 
-- **For Python tests**: Use `runTests` tool with specific file paths
-- **For JavaScript/TypeScript tests**: Use VS Code test runner integration
-- **Never use terminal commands** like `pytest`, `npm test`, `vitest` directly
-- **Always verify tests pass** before committing changes
-- **Never write stubs in the production code**
+- Commits: imperative, present tense with scope when helpful (e.g., "api: fix auth cookie").
+- Run `pre-commit run --all-files` before pushing; no hook failures.
+- PRs: clear description, linked issue, reproduction steps, and screenshots for UI changes.
+- Include local test results and any performance/latency notes for search/chat.
 
-### VS Code Test Explorer Integration
+## Security & Configuration
 
-**CRITICAL: Prevent Test Discovery Failures**
-
-When creating or modifying tests that need VS Code test explorer integration:
-
-1. **Configure Python Environment**: Always call `configure_python_environment` before running tests
-2. **Avoid Global Module Mocking**: Never use `sys.modules["module_name"] = MagicMock()` at module level
-3. **Use Proper Test Isolation**: Mock dependencies within test functions or fixtures, not globally
-
-**Known Issue - Global Module Mocking:**
-
-- **Problem**: Global mocking (e.g., `sys.modules["settings"] = MagicMock()`) affects ALL tests when pytest runs the entire suite
-- **Symptom**: Tests pass individually but fail when run together, showing "TypeError: '>' not supported between instances of 'MagicMock' and 'int'"
-- **Root Cause**: Global mocks from one test file affect imports in other test files
-- **Solution**: Use proper test fixtures and context managers for mocking instead of global module replacement
-
-**Test Fixture Best Practices:**
-
-- Create real objects for direct testing (e.g., `CLIArgs` instances)
-- Use `patch()` context managers or `@patch` decorators for dependencies
-- Mock at the function/method level, not module level
-- Include all required attributes when creating mock objects
-
-## Code Standards
-
-### Python
-
-- Use `black` for formatting (auto-applied by pre-commit)
-- Include type hints for all functions
-- Follow async/await patterns for I/O operations
-- Use `pytest` for testing
-
-### Shell Scripts
-
-- Use `shfmt` formatting (auto-applied by pre-commit)
-- Start with `set -euo pipefail`
-- Use proper error handling and quotes
-
-### Markdown/Documentation
-
-- Use `prettier` formatting (auto-applied by pre-commit)
-- Include code block language identifiers
-- Keep documentation up-to-date with changes
-
-## Architecture Patterns
-
-### Docker Services
-
-- Always include health checks
-- Use proper dependency management with `depends_on`
-- Implement graceful startup/shutdown
-- Use read-only volumes when possible
-
-### Vespa Integration
-
-- Application packages auto-deploy on startup
-- Health checks verify both Vespa and application status
-- Use proper session-based deployment API
-
-### Error Handling
-
-- Implement comprehensive error handling
-- Use structured logging
-- Set appropriate timeouts
-- Provide clear error messages
-
-## Never Skip
-
-- Pre-commit hook execution
-- Code formatting
-- **Running tests with VS Code tools** (not terminal commands)
-- **Python environment configuration** for test discovery
-- **Test isolation** (avoid global mocking that affects other tests)
-- Documentation updates for new features
-- Health check implementations
-- Proper error handling
-
-Remember: **Quality code is formatted code. Always run pre-commit hooks after any changes!**
-Remember: **Reliable code is tested code. Always use VS Code testing tools to verify functionality!**
-Remember: **Isolated tests are reliable tests. Avoid global mocking that affects test discovery!**
-
-## Supported models
-
-The models exists and naming is correct. label -> value. do do not rename it.
-
-- "gpt 5": "gpt-5",
-- "gpt5 mini": "gpt-5-mini",
-- "gpt5 nano": "gpt-5-nano",
+- Never commit secrets. Use `.env` (copy `.env.example`).
+- Bcrypt password hash controls login; cookies are HTTP-only.
+- Telethon sessions and Postgres data are volume-backed; prefer read-only mounts where possible.

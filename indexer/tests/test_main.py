@@ -20,7 +20,7 @@ def mock_cli_args():
     args = CLIArgs(
         once=True,
         chats=None,  # Test with no specific chats (all chats)
-        days=7,
+        days=None,
         dry_run=False,
         limit_messages=10,  # Global limit across all chats
         embed_batch_size=5,
@@ -417,6 +417,41 @@ class TestTelegramIndexer:
         # Verify get_all_chats was not called since specific chats were provided
         mock_indexer_deps["tg"].get_all_chats.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_full_history_when_days_none(self, mock_cli_args, mock_indexer_deps):
+        """Ensure run_once fetches full history when days is None."""
+
+        # Ensure default of None remains
+        mock_cli_args.days = None
+        mock_cli_args.limit_messages = 1
+
+        since_values = []
+
+        async def mock_get_messages(entity, limit=None, since_date=None):
+            since_values.append(since_date)
+            yield self._create_mock_message(1, "Test message")
+
+        mock_indexer_deps["tg"].get_messages = mock_get_messages
+
+        indexer = TelegramIndexer(mock_cli_args)
+        indexer.db = mock_indexer_deps["db"]
+        indexer.tg_client = mock_indexer_deps["tg"]
+        indexer.chunker = mock_indexer_deps["chunker"]
+        indexer.embedder = mock_indexer_deps["embedder"]
+        indexer.vespa_client = mock_indexer_deps["vespa"]
+
+        async def mock_process_message(msg_data):
+            indexer.metrics.messages_indexed += 1
+
+        indexer.process_message = mock_process_message
+
+        await indexer.run_once()
+
+        assert since_values, "Expected get_messages to be called"
+        assert (
+            since_values[0] is None
+        ), "Expected since_date to be None for full history"
+
     def _create_mock_message(self, message_id: int, text: str):
         """Helper to create mock message objects."""
         message = MagicMock()
@@ -429,8 +464,8 @@ class TestTelegramIndexer:
         return message
 
 
-def test_simple_cliargs():
-    """Simple test to verify CLIArgs functionality."""
+def test_simple_cliargs_with_explicit_days():
+    """Simple test to verify CLIArgs accepts explicit days."""
     # Import CLIArgs directly to avoid global mocking from other tests
     import importlib
     import sys
@@ -584,8 +619,8 @@ def test_no_message_limit(
     assert remaining_limit is None, "Should have no limit when limit_messages is None"
 
 
-def test_simple_cliargs():
-    """Simple test to verify CLIArgs functionality."""
+def test_cliargs_default_days():
+    """Verify CLIArgs defaults to full history when days omitted."""
     # Import CLIArgs directly from file to bypass any global mocks
     import sys
     import importlib.util
@@ -603,7 +638,6 @@ def test_simple_cliargs():
     args = CLIArgs(
         once=True,
         chats="Chat1,Chat2",
-        days=7,
         dry_run=False,
         limit_messages=10,
         embed_batch_size=5,
@@ -614,9 +648,23 @@ def test_simple_cliargs():
 
     assert args.once is True
     assert args.limit_messages == 10
-    assert args.days == 7
+    assert args.days is None
     chat_list = args.get_chat_list()
     assert chat_list == ["Chat1", "Chat2"]
+
+    args_with_days = CLIArgs(
+        once=True,
+        chats="Chat1,Chat2",
+        days=7,
+        dry_run=False,
+        limit_messages=10,
+        embed_batch_size=5,
+        embed_concurrency=2,
+        sleep_ms=0,
+        log_level="INFO",
+    )
+
+    assert args_with_days.days == 7
 
 
 class TestCLIArgs:
