@@ -51,20 +51,20 @@ class TestChatsEndpoint:
         """Test that chats endpoint returns chat list."""
         reset_attempts()
         client = get_client()
-        
+
         # Mock the chat data
         mock_chats = [
             ChatInfo(
                 chat_id="-1001234567890",
                 source_title="Test Supergroup",
                 chat_type="supergroup",
-                message_count=150
+                message_count=150,
             ),
             ChatInfo(
                 chat_id="123456789",
                 source_title="Saved Messages",
                 chat_type="private",
-                message_count=50
+                message_count=50,
             ),
         ]
         mock_get_chats.return_value = mock_chats
@@ -72,9 +72,9 @@ class TestChatsEndpoint:
         # Login first to get authenticated session
         login_response = login(client)
         assert login_response.status_code == 200
-        
+
         response = client.get("/chats")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
@@ -88,15 +88,15 @@ class TestChatsEndpoint:
         """Test that chats endpoint handles errors gracefully."""
         reset_attempts()
         client = get_client()
-        
+
         mock_get_chats.side_effect = Exception("Vespa error")
 
         # Login first to get authenticated session
         login_response = login(client)
         assert login_response.status_code == 200
-        
+
         response = client.get("/chats")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is False

@@ -6,7 +6,10 @@ interface ChatSelectorProps {
   onChatChange: (chatId: string) => void;
 }
 
-export default function ChatSelector({ value, onChatChange }: ChatSelectorProps) {
+export default function ChatSelector({
+  value,
+  onChatChange,
+}: ChatSelectorProps) {
   const [chats, setChats] = useState<ChatInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +24,10 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
         setSearchTerm("");
       }
@@ -39,10 +45,10 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
       setError(null);
       const chatsData = await fetchChats();
       setChats(chatsData);
-      
+
       // Load saved chat from localStorage
       const savedChat = localStorage.getItem("selectedChatId");
-      if (savedChat && chatsData.some(chat => chat.chat_id === savedChat)) {
+      if (savedChat && chatsData.some((chat) => chat.chat_id === savedChat)) {
         onChatChange(savedChat);
       } else if (chatsData.length > 0 && !value) {
         // Default to "All Chats" (empty value)
@@ -69,7 +75,7 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
     if (chat.source_title) {
       return chat.source_title;
     }
-    
+
     // Format chat_id for display
     if (chat.chat_id.startsWith("-100")) {
       return `Supergroup ${chat.chat_id.substring(4)}`;
@@ -81,13 +87,13 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
   };
 
   // Filter chats based on search term
-  const filteredChats = chats.filter(chat => {
+  const filteredChats = chats.filter((chat) => {
     if (!searchTerm) return true;
-    
+
     const searchLower = searchTerm.toLowerCase();
     const chatLabel = getChatLabel(chat).toLowerCase();
     const chatId = chat.chat_id.toLowerCase();
-    
+
     return chatLabel.includes(searchLower) || chatId.includes(searchLower);
   });
 
@@ -139,21 +145,38 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
           className="w-full px-3 py-2 text-left text-sm border border-gray-300 rounded-lg bg-white hover:border-blue-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-colors flex items-center justify-between"
         >
           <span className="truncate">
-            {value ? 
-              (() => {
-                const selectedChat = chats.find(chat => chat.chat_id === value);
-                return selectedChat ? 
-                  `${getChatTypeIcon(selectedChat.chat_type)} ${getChatLabel(selectedChat)} ${selectedChat.message_count > 0 ? `(${selectedChat.message_count})` : ''}` :
-                  `Chat ${value}`;
-              })() :
-              `All Chats (${chats.length})`
-            }
+            {value
+              ? (() => {
+                  const selectedChat = chats.find(
+                    (chat) => chat.chat_id === value,
+                  );
+                  return selectedChat
+                    ? `${getChatTypeIcon(
+                        selectedChat.chat_type,
+                      )} ${getChatLabel(selectedChat)} ${
+                        selectedChat.message_count > 0
+                          ? `(${selectedChat.message_count})`
+                          : ""
+                      }`
+                    : `Chat ${value}`;
+                })()
+              : `All Chats (${chats.length})`}
           </span>
-          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <svg
+            className="w-4 h-4 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
           </svg>
         </button>
-        
+
         {isOpen && (
           <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-hidden">
             {/* Search input */}
@@ -167,7 +190,7 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
                 autoFocus
               />
             </div>
-            
+
             {/* Options list */}
             <div className="max-h-48 overflow-y-auto">
               <button
@@ -180,7 +203,7 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
               >
                 All Chats ({chats.length})
               </button>
-              
+
               {filteredChats.map((chat) => (
                 <button
                   key={chat.chat_id}
@@ -194,11 +217,13 @@ export default function ChatSelector({ value, onChatChange }: ChatSelectorProps)
                   <span>{getChatTypeIcon(chat.chat_type)}</span>
                   <span className="truncate">{getChatLabel(chat)}</span>
                   {chat.message_count > 0 && (
-                    <span className="text-gray-500">({chat.message_count})</span>
+                    <span className="text-gray-500">
+                      ({chat.message_count})
+                    </span>
                   )}
                 </button>
               ))}
-              
+
               {filteredChats.length === 0 && searchTerm && (
                 <div className="px-3 py-2 text-sm text-gray-500">
                   No chats found matching "{searchTerm}"
