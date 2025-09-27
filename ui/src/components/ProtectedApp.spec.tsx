@@ -14,6 +14,7 @@ vi.mock("../lib/api", () => {
   return {
     logout: vi.fn(),
     fetchModels: vi.fn().mockResolvedValue([{ label: "Model A", id: "a" }]),
+    DEFAULT_SEARCH_LIMIT: 20,
     search: vi.fn((q: string) => {
       if (q === "err") return Promise.reject(new Error("Boom"));
       if (!q.trim()) return Promise.resolve([]);

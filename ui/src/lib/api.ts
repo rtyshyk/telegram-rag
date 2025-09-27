@@ -170,7 +170,23 @@ export async function* chatStream(
   });
 
   if (res.status === 401) {
-    window.location.href = "/login";
+    const canRedirect =
+      typeof window !== "undefined" &&
+      typeof window.location !== "undefined" &&
+      import.meta.env.MODE !== "test";
+
+    if (canRedirect) {
+      try {
+        window.location.href = "/login";
+      } catch (err) {
+        if (
+          !(err instanceof Error) ||
+          !err.message.includes("Not implemented: navigation")
+        ) {
+          throw err;
+        }
+      }
+    }
     throw new Error("Unauthorized");
   }
 
