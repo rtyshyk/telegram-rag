@@ -1,5 +1,11 @@
 import React from "react";
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  cleanup,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import ChatSelector from "./ChatSelector";
@@ -81,14 +87,20 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /All Chats/ })).toHaveTextContent("All Chats (3)");
+      expect(
+        screen.getByRole("button", { name: /All Chats/ }),
+      ).toHaveTextContent("All Chats (3)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /All Chats/ }));
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText("Search chats...")).toBeInTheDocument();
-      expect(screen.getAllByRole("button", { name: /All Chats \(3\)/ })).toHaveLength(2);
+      expect(
+        screen.getByPlaceholderText("Search chats..."),
+      ).toBeInTheDocument();
+      expect(
+        screen.getAllByRole("button", { name: /All Chats \(3\)/ }),
+      ).toHaveLength(2);
       expect(screen.getByText("Saved Messages")).toBeInTheDocument();
     });
   });
@@ -99,13 +111,17 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /All Chats/ })).toHaveTextContent("All Chats (3)");
+      expect(
+        screen.getByRole("button", { name: /All Chats/ }),
+      ).toHaveTextContent("All Chats (3)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /All Chats/ }));
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText("Search chats...")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Search chats..."),
+      ).toBeInTheDocument();
     });
 
     const searchInput = screen.getByPlaceholderText("Search chats...");
@@ -123,20 +139,26 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /All Chats/ })).toHaveTextContent("All Chats (3)");
+      expect(
+        screen.getByRole("button", { name: /All Chats/ }),
+      ).toHaveTextContent("All Chats (3)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /All Chats/ }));
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText("Search chats...")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Search chats..."),
+      ).toBeInTheDocument();
     });
 
     const searchInput = screen.getByPlaceholderText("Search chats...");
     fireEvent.change(searchInput, { target: { value: "nonexistent" } });
 
     await waitFor(() => {
-      expect(screen.getByText('No chats found matching "nonexistent"')).toBeInTheDocument();
+      expect(
+        screen.getByText('No chats found matching "nonexistent"'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -146,7 +168,9 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /All Chats/ })).toHaveTextContent("All Chats (3)");
+      expect(
+        screen.getByRole("button", { name: /All Chats/ }),
+      ).toHaveTextContent("All Chats (3)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /All Chats/ }));
@@ -158,7 +182,10 @@ describe("ChatSelector", () => {
     fireEvent.click(screen.getByText("Saved Messages"));
 
     expect(mockOnChatChange).toHaveBeenCalledWith("123456789");
-    expect(localStorageMock.setItem).toHaveBeenCalledWith("selectedChatId", "123456789");
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      "selectedChatId",
+      "123456789",
+    );
   });
 
   it("displays selected chat correctly", async () => {
@@ -178,16 +205,22 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="123456789" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Saved Messages/ })).toHaveTextContent("👤 Saved Messages (50)");
+      expect(
+        screen.getByRole("button", { name: /Saved Messages/ }),
+      ).toHaveTextContent("👤 Saved Messages (50)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Saved Messages/ }));
 
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: /All Chats \(3\)/ })).toHaveLength(1);
+      expect(
+        screen.getAllByRole("button", { name: /All Chats \(3\)/ }),
+      ).toHaveLength(1);
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /All Chats \(3\)/ })[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /All Chats \(3\)/ })[0],
+    );
 
     expect(mockOnChatChange).toHaveBeenCalledWith("");
     expect(localStorageMock.removeItem).toHaveBeenCalledWith("selectedChatId");
@@ -199,7 +232,9 @@ describe("ChatSelector", () => {
     render(<ChatSelector value="" onChatChange={mockOnChatChange} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /All Chats/ })).toHaveTextContent("All Chats (3)");
+      expect(
+        screen.getByRole("button", { name: /All Chats/ }),
+      ).toHaveTextContent("All Chats (3)");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /All Chats/ }));
