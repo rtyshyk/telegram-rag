@@ -1,6 +1,5 @@
 services:
   api:
-    # Mount source for live reload; reuse image python deps from build stage
     volumes:
       - ./api/app:/app/app:ro
       - api_reload_cache:/app/.reload
@@ -9,7 +8,6 @@ services:
     command: bash -c "python -m app.migrate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   ui:
-    # Use dev stage for hot reload; mount only source & config for HMR; keep node_modules inside image
     build:
       context: ./ui
       target: dev
@@ -17,13 +15,12 @@ services:
       - ./ui/src:/app/src
       - ./ui/astro.config.mjs:/app/astro.config.mjs
       - ./ui/tailwind.config.mjs:/app/tailwind.config.mjs
-    # Hard memory limit for local (non‑swarm) compose; prevents host OOM -> SIGKILL
     mem_limit: 1024m
     environment:
       - NODE_ENV=development
       - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8000}
       - ASTRO_TELEMETRY_DISABLED=1
-      - NODE_OPTIONS=--max-old-space-size=640 # leave headroom for native deps & watchers
+      - NODE_OPTIONS=--max-old-space-size=640
 
   indexer:
     build: ./indexer
