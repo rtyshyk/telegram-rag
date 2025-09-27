@@ -119,7 +119,9 @@ class CohereReranker:
         }
 
         try:
-            response = await self._http.post(self._RERANK_ENDPOINT, json=payload, headers=headers)
+            response = await self._http.post(
+                self._RERANK_ENDPOINT, json=payload, headers=headers
+            )
             response.raise_for_status()
             data = response.json()
         except Exception as exc:  # pragma: no cover - network errors
@@ -223,7 +225,11 @@ class VespaSearchClient:
         reranker = self.reranker
         if reranker and reranker.enabled:
             candidate_limit = max(req.limit, settings.rerank_candidate_limit)
-        fetch_request = req if candidate_limit == req.limit else req.model_copy(update={"limit": candidate_limit})
+        fetch_request = (
+            req
+            if candidate_limit == req.limit
+            else req.model_copy(update={"limit": candidate_limit})
+        )
         yql, body, query_params = await self._build_query(fetch_request)
         try:
             resp = await self.http.post(f"{self.endpoint}/search/", json=body)
@@ -261,7 +267,7 @@ class VespaSearchClient:
             )
         if reranker and reranker.enabled:
             return await reranker.rerank(req.q, results, req.limit)
-        return results[:req.limit]
+        return results[: req.limit]
 
     async def get_available_chats(self) -> List[ChatInfo]:
         """Get list of available chats with aggregation"""
