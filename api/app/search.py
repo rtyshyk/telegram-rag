@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class SearchRequest(BaseModel):
     q: str
-    limit: int = 10
+    limit: int = settings.search_default_limit
     chat_id: Optional[str] = None
     thread_id: Optional[int] = None
     hybrid: bool = True
@@ -28,6 +29,8 @@ class SearchResult(BaseModel):
     message_id: int
     chunk_idx: int
     score: float
+    retrieval_score: Optional[float] = None
+    rerank_score: Optional[float] = None
     sender: Optional[str] = None
     sender_username: Optional[str] = None
     message_date: Optional[int] = None
@@ -61,19 +64,167 @@ class EmbeddingProvider:
         return resp.data[0].embedding  # type: ignore[attr-defined]
 
 
+class CohereReranker:
+    """Optional reranker using Cohere's Rerank API (or local stub)."""
+
+    _RERANK_ENDPOINT = "https://api.cohere.com/v1/rerank"
+
+    def __init__(self, http: Optional[httpx.AsyncClient] = None):
+        self.stub = bool(settings.cohere_stub)
+        self.api_key = settings.cohere_api_key
+        self.model = settings.rerank_model
+        self.enabled = settings.rerank_enabled and (self.stub or bool(self.api_key))
+        self._http = http
+        self._owns_http = False
+
+        if self.enabled and not self.stub:
+            if self._http is None:
+                self._http = httpx.AsyncClient(timeout=20)
+                self._owns_http = True
+        elif settings.rerank_enabled and not self.enabled:
+            logger.warning(
+                "Rerank enabled but no Cohere API key provided; falling back to Vespa ranking."
+            )
+
+    async def aclose(self) -> None:
+        if self._owns_http and self._http:
+            await self._http.aclose()
+
+    async def rerank(
+        self, query: str, results: List[SearchResult], top_n: int
+    ) -> List[SearchResult]:
+        if not self.enabled or not results:
+            return results[:top_n]
+
+        if not query.strip():
+            return results[:top_n]
+
+        if self.stub:
+            return self._rerank_stub(query, results, top_n)
+
+        if not self._http or not self.api_key:
+            logger.warning("Cohere client not available; skipping rerank.")
+            return results[:top_n]
+
+        payload = {
+            "model": self.model,
+            "query": query,
+            "documents": [r.text for r in results],
+            "top_n": min(top_n, len(results)),
+            "return_documents": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            response = await self._http.post(self._RERANK_ENDPOINT, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:  # pragma: no cover - network errors
+            logger.warning("Cohere rerank failed: %s", exc)
+            return results[:top_n]
+
+        reranked: List[SearchResult] = []
+        seen_indices: set[int] = set()
+
+        for item in data.get("results", []):
+            idx = item.get("index")
+            if idx is None or idx >= len(results):
+                continue
+            seen_indices.add(idx)
+            result = results[idx]
+            score = float(item.get("relevance_score", result.score))
+            result.rerank_score = score
+            result.score = score
+            reranked.append(result)
+            if len(reranked) >= top_n:
+                break
+
+        if len(reranked) < top_n:
+            for idx, result in enumerate(results):
+                if idx in seen_indices:
+                    continue
+                reranked.append(result)
+                if len(reranked) >= top_n:
+                    break
+
+        return reranked[:top_n]
+
+    def _rerank_stub(
+        self, query: str, results: List[SearchResult], top_n: int
+    ) -> List[SearchResult]:
+        query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return results[:top_n]
+
+        scored: List[tuple[float, float, int, SearchResult]] = []
+        for idx, result in enumerate(results):
+            doc_tokens = self._tokenize(result.text)
+            overlap = len(query_tokens & doc_tokens)
+            overlap_ratio = overlap / max(len(query_tokens), 1)
+            retrieval_score = result.retrieval_score or result.score
+            scored.append((overlap_ratio, retrieval_score, idx, result))
+
+        scored.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+
+        reranked: List[SearchResult] = []
+        seen_indices: set[int] = set()
+
+        for overlap_ratio, _, idx, result in scored:
+            if idx in seen_indices:
+                continue
+            seen_indices.add(idx)
+            result.rerank_score = overlap_ratio if overlap_ratio > 0 else None
+            if overlap_ratio > 0:
+                result.score = overlap_ratio
+            reranked.append(result)
+            if len(reranked) >= top_n:
+                break
+
+        if len(reranked) < top_n:
+            for _, _, idx, result in scored:
+                if idx in seen_indices:
+                    continue
+                seen_indices.add(idx)
+                reranked.append(result)
+                if len(reranked) >= top_n:
+                    break
+
+        return reranked[:top_n]
+
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        return {tok for tok in re.findall(r"\w+", text.lower()) if tok}
+
+
 class VespaSearchClient:
     def __init__(self, http: Optional[httpx.AsyncClient] = None):
         self.endpoint = settings.vespa_endpoint.rstrip("/")
         self.http = http or httpx.AsyncClient(timeout=20)
         self.embedder = EmbeddingProvider()
+        self.reranker: Optional[CohereReranker] = None
+
+        if settings.rerank_enabled:
+            reranker = CohereReranker()
+            if reranker.enabled:
+                self.reranker = reranker
 
     async def close(self):
         await self.http.aclose()
+        if self.reranker:
+            await self.reranker.aclose()
 
     async def search(self, req: SearchRequest) -> List[SearchResult]:
         if not req.q.strip():
             return []
-        yql, body, query_params = await self._build_query(req)
+        candidate_limit = req.limit
+        reranker = self.reranker
+        if reranker and reranker.enabled:
+            candidate_limit = max(req.limit, settings.rerank_candidate_limit)
+        fetch_request = req if candidate_limit == req.limit else req.model_copy(update={"limit": candidate_limit})
+        yql, body, query_params = await self._build_query(fetch_request)
         try:
             resp = await self.http.post(f"{self.endpoint}/search/", json=body)
             resp.raise_for_status()
@@ -88,6 +239,7 @@ class VespaSearchClient:
         results: List[SearchResult] = []
         for h in hits:
             fields = h.get("fields", {})
+            base_score = float(h.get("relevance", 0.0))
             results.append(
                 SearchResult(
                     id=fields.get("id", ""),
@@ -95,7 +247,8 @@ class VespaSearchClient:
                     chat_id=fields.get("chat_id", ""),
                     message_id=int(fields.get("message_id", 0) or 0),
                     chunk_idx=int(fields.get("chunk_idx", 0) or 0),
-                    score=float(h.get("relevance", 0.0)),
+                    score=base_score,
+                    retrieval_score=base_score,
                     sender=fields.get("sender"),
                     sender_username=fields.get("sender_username"),
                     message_date=fields.get("message_date"),
@@ -106,7 +259,9 @@ class VespaSearchClient:
                     has_link=fields.get("has_link"),
                 )
             )
-        return results
+        if reranker and reranker.enabled:
+            return await reranker.rerank(req.q, results, req.limit)
+        return results[:req.limit]
 
     async def get_available_chats(self) -> List[ChatInfo]:
         """Get list of available chats with aggregation"""

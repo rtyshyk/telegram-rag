@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { chatStream, ChatStreamChunk } from "../../src/lib/api";
+import {
+  chatStream,
+  ChatStreamChunk,
+  DEFAULT_SEARCH_LIMIT,
+} from "../../src/lib/api";
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -49,7 +53,7 @@ describe("Chat Streaming API", () => {
         credentials: "include",
         body: JSON.stringify({
           q: "test query",
-          k: 12,
+          k: DEFAULT_SEARCH_LIMIT,
           model_id: undefined,
           filters: undefined,
           use_current_filters: true,

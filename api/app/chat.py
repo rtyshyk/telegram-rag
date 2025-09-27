@@ -40,7 +40,12 @@ class ChatRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
     q: str = Field(..., min_length=1, description="Query text")
-    k: int = Field(default=12, ge=1, le=30, description="Number of search results")
+    k: int = Field(
+        default=settings.search_default_limit,
+        ge=1,
+        le=30,
+        description="Number of search results",
+    )
     model_id: Optional[str] = Field(default=None, description="Model ID from /models")
     filters: Optional[ChatFilters] = Field(default=None, description="Search filters")
     use_current_filters: bool = Field(default=True, description="Use current filters")

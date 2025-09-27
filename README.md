@@ -122,10 +122,6 @@ scripts/            Helpers: deploy-vespa.sh, wait_for_health.sh, smoke_tests.sh
 - Telethon sessions and Postgres data live on Docker volumes you control.
 - If exposing the stack, front it with TLS termination and consider IP allow-listing.
 
-## TODO
-
-- Implement Cohere rerank integration across the API and UI. Environment placeholders (`COHERE_API_KEY`, `RERANK_ENABLED`) and documentation references exist, but no reranking client or request path is wired up yet.
-
 ## Supporting Scripts
 
 - `./scripts/wait_for_health.sh` - wait until API and Vespa report healthy

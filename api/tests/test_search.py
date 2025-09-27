@@ -423,3 +423,57 @@ class TestVespaSearchClient:
         yql = body["yql"]
 
         assert "targetHits:25" in yql
+
+    @pytest.mark.asyncio
+    async def test_rerank_stub_reorders_and_expands_candidate_pool(
+        self, mock_http_client, mock_embedder, monkeypatch
+    ):
+        """Ensure rerank stub reorders results and increases Vespa hits."""
+
+        monkeypatch.setattr(settings, "rerank_enabled", True)
+        monkeypatch.setattr(settings, "cohere_stub", True)
+        monkeypatch.setattr(settings, "rerank_candidate_limit", 5)
+        monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+
+        client = VespaSearchClient(http=mock_http_client)
+        client.embedder = mock_embedder
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "root": {
+                "children": [
+                    {
+                        "fields": {
+                            "id": "doc-alpha",
+                            "text": "Alpha content with no match",
+                            "chat_id": "chatA",
+                            "message_id": 1,
+                            "chunk_idx": 0,
+                        },
+                        "relevance": 0.9,
+                    },
+                    {
+                        "fields": {
+                            "id": "doc-beta",
+                            "text": "Beta insight and details",
+                            "chat_id": "chatB",
+                            "message_id": 2,
+                            "chunk_idx": 0,
+                        },
+                        "relevance": 0.4,
+                    },
+                ]
+            }
+        }
+        mock_http_client.post.return_value = mock_response
+
+        req = SearchRequest(q="beta", limit=2, hybrid=False)
+        results = await client.search(req)
+
+        call_args = mock_http_client.post.call_args
+        request_body = call_args[1]["json"]
+        assert request_body["hits"] == 5
+
+        assert [r.id for r in results] == ["doc-beta", "doc-alpha"]
+        assert results[0].rerank_score is not None
+        assert results[0].score == results[0].rerank_score
