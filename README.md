@@ -76,13 +76,18 @@ The `vespa-deploy` service waits for Vespa to become healthy and then pushes `ve
 
 ## Indexing Telegram Data
 
+### Caveats
+
+- The long-running daemon is planned but not implemented; expect a log warning and rely on scheduled re-runs for now.
+- Telegram deletions are intentionally ignored—once ingested, messages remain searchable to preserve historical context.
+
 - First full sync: `docker compose run --rm indexer python main.py --once`
 - Target specific chats/dates (example):
   ```bash
   docker compose run --rm indexer python main.py --once \
     --chats '<Saved Messages>' --days 30 --limit-messages 50
   ```
-  The daemon keeps running inside the `indexer` service to capture edits and deletions.
+  NOTE: Daemon mode is not yet implemented in Phase 2; use `--once` or cron-style runs until live updates land.
 
 ## API & UI Usage
 

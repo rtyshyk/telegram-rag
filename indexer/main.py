@@ -155,6 +155,7 @@ class TelegramIndexer:
                 msg_data = self.tg_client.extract_message_data(message, entity)
                 msg_data["chat_id"] = chat_id
                 msg_data["source_title"] = chat_info["title"]
+                msg_data["chat_username"] = chat_info.get("username")
 
                 # Skip if no text content
                 if not msg_data["text"].strip():
@@ -252,6 +253,7 @@ class TelegramIndexer:
                 edit_date=msg_data.get("edit_date"),
                 sender=msg_data.get("sender"),
                 sender_username=msg_data.get("sender_username"),
+                chat_username=msg_data.get("chat_username"),
                 chat_type=msg_data.get("chat_type"),
                 thread_id=msg_data.get("thread_id"),
                 has_link=has_link,
@@ -293,6 +295,7 @@ class TelegramIndexer:
                 source_title=msg_data.get("source_title"),
                 sender=chunk_obj.sender,
                 sender_username=chunk_obj.sender_username,
+                chat_username=chunk_obj.chat_username,
                 chat_type=chunk_obj.chat_type,
                 message_date=chunk_obj.message_date,
                 edit_date=chunk_obj.edit_date,

@@ -61,6 +61,7 @@ class ChatCitation(BaseModel):
     chunk_idx: int
     source_title: Optional[str] = None
     message_date: Optional[int] = None
+    chat_username: Optional[str] = None
 
 
 class ChatUsage(BaseModel):
@@ -628,18 +629,26 @@ class ChatService:
                     logger.warning(f"Manual usage estimation failed: {e}")
 
             # Build citations (only if we performed search)
+            def _safe_str(value: Any | None) -> str | None:
+                return value if isinstance(value, str) and value else None
+
             citations = []
             if should_search and search_results:
                 for i, orig_idx in enumerate(selected_indices):
                     result = search_results[orig_idx]
                     citations.append(
                         ChatCitation(
-                            id=result.id,
-                            chat_id=result.chat_id,
-                            message_id=result.message_id,
-                            chunk_idx=result.chunk_idx,
-                            source_title=result.source_title,
-                            message_date=result.message_date,
+                            id=getattr(result, "id", ""),
+                            chat_id=getattr(result, "chat_id", ""),
+                            message_id=getattr(result, "message_id", 0),
+                            chunk_idx=getattr(result, "chunk_idx", 0),
+                            source_title=_safe_str(
+                                getattr(result, "source_title", None)
+                            ),
+                            message_date=getattr(result, "message_date", None),
+                            chat_username=_safe_str(
+                                getattr(result, "chat_username", None)
+                            ),
                         )
                     )
 

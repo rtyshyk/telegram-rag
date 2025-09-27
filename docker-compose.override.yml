@@ -27,6 +27,10 @@ services:
     volumes:
       - ./indexer/sessions:/sessions
 
+  postgres:
+    ports:
+      - "5432:5432"
+
 volumes:
   api_reload_cache:
   ui_node_modules:

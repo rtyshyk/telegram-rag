@@ -12,6 +12,7 @@ import {
   ChatUsage,
   DEFAULT_SEARCH_LIMIT,
 } from "../lib/api";
+import { formatTelegramLink } from "../lib/telegram_links";
 
 interface Message {
   id: string;
@@ -38,58 +39,6 @@ const formatDate = (timestamp?: number) => {
     hour: "2-digit",
     minute: "2-digit",
   });
-};
-const formatTelegramLink = (
-  chatId: string,
-  messageId: number,
-  sourceTitle?: string,
-  chatType?: string,
-) => {
-  console.log("Formatting Telegram link:", {
-    chatId,
-    messageId,
-    sourceTitle,
-    chatType,
-  });
-
-  // For Saved Messages, try the standard web format first
-  if (sourceTitle === "Saved Messages") {
-    // For Saved Messages, we can try opening the direct message link
-    // but it might not work in browser - fallback to opening Saved Messages
-    const link = `https://web.telegram.org/k/#@me`;
-    console.log("Saved Messages link:", link);
-    return link;
-  }
-
-  // Handle different chat ID formats for Telegram message links
-  // Based on the documentation: Message links section
-
-  // For supergroups and channels (negative IDs starting with -100)
-  if (chatId.startsWith("-100")) {
-    // Remove the -100 prefix to get the channel ID
-    const cleanChatId = chatId.substring(4);
-    // Use the private message link format: t.me/c/<channel>/<id>
-    const link = `https://t.me/c/${cleanChatId}/${messageId}`;
-    console.log("Supergroup/channel link:", link);
-    return link;
-  }
-  // For regular groups (negative IDs starting with -)
-  else if (chatId.startsWith("-")) {
-    // Remove the - prefix
-    const cleanChatId = chatId.substring(1);
-    // Use the private message link format: t.me/c/<channel>/<id>
-    const link = `https://t.me/c/${cleanChatId}/${messageId}`;
-    console.log("Group link:", link);
-    return link;
-  }
-  // For private chats (positive user IDs) - can't link to specific messages via HTTP
-  else {
-    // For private chats, we can't link to specific messages via HTTP links
-    // Just open Telegram Web
-    const link = `https://web.telegram.org/k/`;
-    console.log("Private chat link (no specific message):", link);
-    return link;
-  }
 };
 
 const getChatTypeLabel = (chatType?: string) => {
@@ -229,6 +178,7 @@ export default function ProtectedApp() {
     const seq = ++searchSeqRef.current; // capture sequence id
     setSearchLoading(true);
     setSearchError(null);
+    setCurrentSearchQuery(trimmed);
     try {
       const searchOpts: any = { limit: DEFAULT_SEARCH_LIMIT, hybrid: true };
       if (selectedChat) {
@@ -239,7 +189,6 @@ export default function ProtectedApp() {
       if (seq !== searchSeqRef.current) return;
       const aggregated = aggregateSearchResults(results);
       setSearchResults(aggregated);
-      setCurrentSearchQuery(trimmed);
     } catch (err: any) {
       if (seq !== searchSeqRef.current) return; // stale
       setSearchError(err?.message || "Search failed");
@@ -248,13 +197,11 @@ export default function ProtectedApp() {
     }
   };
 
+  // Re-run the most recent query when the chat filter changes
   useEffect(() => {
-    if (!input.trim()) return; // keep prior results if input cleared after send
-    const h = setTimeout(() => {
-      runSearch(input, { preserveOnEmpty: false });
-    }, 350);
-    return () => clearTimeout(h);
-  }, [input, selectedChat]); // Re-run search when chat selection changes
+    if (!currentSearchQuery.trim()) return;
+    runSearch(currentSearchQuery, { preserveOnEmpty: true });
+  }, [selectedChat]);
 
   const handleSend = async (message: string) => {
     if (!message.trim() || isLoading) return;
@@ -443,12 +390,13 @@ export default function ProtectedApp() {
   };
 
   const formatCitationLink = (citation: ChatCitation) => {
-    return formatTelegramLink(
-      citation.chat_id,
-      citation.message_id,
-      citation.source_title,
-      undefined, // We don't have chat_type in citations
-    );
+    return formatTelegramLink({
+      chatId: citation.chat_id,
+      messageId: citation.message_id,
+      sourceTitle: citation.source_title,
+      chatType: undefined,
+      chatUsername: citation.chat_username,
+    });
   };
 
   const renderMessageContent = (message: Message) => {
@@ -802,7 +750,12 @@ export default function ProtectedApp() {
               <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 flex flex-col gap-2">
                 <div>{searchError}</div>
                 <button
-                  onClick={() => runSearch(input)}
+                  onClick={() => {
+                    const retryQuery = currentSearchQuery || input;
+                    if (retryQuery.trim()) {
+                      runSearch(retryQuery, { preserveOnEmpty: true });
+                    }
+                  }}
                   className="self-start px-2 py-1 text-[10px] font-medium bg-red-600 text-white rounded hover:bg-red-700"
                 >
                   Retry
@@ -816,7 +769,7 @@ export default function ProtectedApp() {
               )}
             {!currentSearchQuery.trim() && searchResults.length === 0 && (
               <div className="text-gray-400">
-                Type to search indexed messages…
+                Send a message to surface relevant context here.
               </div>
             )}
             {searchResults.map((r) => (
@@ -858,12 +811,13 @@ export default function ProtectedApp() {
                     <button
                       onClick={() =>
                         window.open(
-                          formatTelegramLink(
-                            r.chat_id,
-                            r.message_id,
-                            r.source_title,
-                            r.chat_type,
-                          ),
+                          formatTelegramLink({
+                            chatId: r.chat_id,
+                            messageId: r.message_id,
+                            sourceTitle: r.source_title,
+                            chatType: r.chat_type,
+                            chatUsername: r.chat_username,
+                          }),
                           "_blank",
                         )
                       }
@@ -924,7 +878,14 @@ export default function ProtectedApp() {
           <div className="flex-1">
             <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setInput(nextValue);
+                if (!nextValue.trim()) {
+                  setSearchResults([]);
+                  setCurrentSearchQuery("");
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

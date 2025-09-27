@@ -48,6 +48,7 @@ describe("ProtectedApp search panel", () => {
     render(<ProtectedApp />);
     const textarea = screen.getByPlaceholderText(/Type your message/i);
     fireEvent.change(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     // loading indicator
     await screen.findByText((t) => t.startsWith("Searching"));
     await screen.findByText(/Result one about hello/);
@@ -55,10 +56,13 @@ describe("ProtectedApp search panel", () => {
 
   it("shows error and retry works", async () => {
     render(<ProtectedApp />);
-    const textarea = screen.getByPlaceholderText(/Type your message/i);
+    let textarea = screen.getByPlaceholderText(/Type your message/i);
     fireEvent.change(textarea, { target: { value: "err" } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     await screen.findByText(/Boom/);
+    textarea = screen.getByPlaceholderText(/Type your message/i);
     fireEvent.change(textarea, { target: { value: "ok" } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     await screen.findByText((t) => t.startsWith("Searching"));
     await screen.findByText(/Result one about ok/);
   }, 10000);

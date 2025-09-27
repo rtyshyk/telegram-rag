@@ -74,6 +74,7 @@ class TelethonClientWrapper:
                         "id": str(self.me.id),
                         "title": "Saved Messages",
                         "type": "saved",
+                        "username": getattr(entity, "username", None),
                     }
                 else:
                     # Try to resolve by username, name, or ID
@@ -93,6 +94,7 @@ class TelethonClientWrapper:
                         "id": str(entity.id),
                         "title": title,
                         "type": chat_type,
+                        "username": getattr(entity, "username", None),
                     }
 
                 logger.info(
@@ -267,6 +269,7 @@ class TelethonClientWrapper:
                 forward_name, _ = format_sender_name(message.forward.sender)
                 data["forward_from"] = forward_name
 
+        data["entity"] = chat_entity
         return data
 
     def _stub_resolve_chats(self, chat_names: List[str]) -> Dict[str, Any]:
@@ -278,6 +281,7 @@ class TelethonClientWrapper:
                 "id": str(1000 + i),
                 "title": f"Test {name}",
                 "type": "private" if name == "<Saved Messages>" else "group",
+                "username": f"test_chat_{i}" if name != "<Saved Messages>" else None,
             }
         return resolved
 
