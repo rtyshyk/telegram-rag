@@ -4,7 +4,8 @@ psycopg2-binary
 bcrypt
 PyJWT
 pydantic-settings
-httpx
+# Pin httpx to keep support for AsyncClient(app=...) used in tests
+httpx==0.26.0
 openai
 tiktoken
 pytest
