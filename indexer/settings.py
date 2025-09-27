@@ -12,20 +12,21 @@ class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     # OpenAI
-    openai_api_key: str
+    # Optional in tests; required in production runtime paths that use Embedder
+    openai_api_key: str | None = None
     embed_model: str = "text-embedding-3-large"
     embed_dimensions: int = 3072
     embed_batch_size: int = 64
     embed_concurrency: int = 4
 
-    # Telegram
-    tg_api_id: int
-    tg_api_hash: str
-    tg_phone: str
+    # Telegram (optional for tests using stubs/mocks)
+    tg_api_id: int | None = None
+    tg_api_hash: str | None = None
+    tg_phone: str | None = None
     telethon_session_path: str = "/sessions/telethon.session"
 
-    # Storage
-    database_url: str
+    # Storage (optional for tests that mock DB)
+    database_url: str | None = None
 
     # Vespa
     vespa_endpoint: str = "http://vespa:8080"
