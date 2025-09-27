@@ -2,6 +2,8 @@
 const API_BASE_RAW = import.meta.env.PUBLIC_API_URL;
 const API_BASE: string = API_BASE_RAW ? API_BASE_RAW.replace(/\/$/, "") : "";
 
+export const DEFAULT_SEARCH_LIMIT = 20;
+
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
@@ -74,7 +76,7 @@ export async function search(
     hybrid?: boolean;
   } = {},
 ): Promise<SearchResult[]> {
-  const payload: any = { q, limit: opts.limit ?? 8 };
+  const payload: any = { q, limit: opts.limit ?? DEFAULT_SEARCH_LIMIT };
   if (opts.chatId) payload.chat_id = opts.chatId;
   if (typeof opts.threadId === "number") payload.thread_id = opts.threadId;
   if (typeof opts.hybrid === "boolean") payload.hybrid = opts.hybrid;
@@ -153,7 +155,7 @@ export async function* chatStream(
 ): AsyncGenerator<ChatStreamChunk, void, unknown> {
   const payload: any = {
     q,
-    k: opts.k ?? 12,
+    k: opts.k ?? DEFAULT_SEARCH_LIMIT,
     model_id: opts.model_id,
     filters: opts.filters,
     use_current_filters: opts.use_current_filters ?? true,

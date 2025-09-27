@@ -10,6 +10,7 @@ import {
   ChatStreamChunk,
   ChatMessage,
   ChatUsage,
+  DEFAULT_SEARCH_LIMIT,
 } from "../lib/api";
 
 interface Message {
@@ -229,7 +230,7 @@ export default function ProtectedApp() {
     setSearchLoading(true);
     setSearchError(null);
     try {
-      const searchOpts: any = { limit: 12, hybrid: true };
+      const searchOpts: any = { limit: DEFAULT_SEARCH_LIMIT, hybrid: true };
       if (selectedChat) {
         searchOpts.chatId = selectedChat;
       }
