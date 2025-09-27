@@ -31,10 +31,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Prepare env for API tests
+        run: cp .env.example .env
       - run: pip install -r api/requirements.txt
       - name: Run API tests
         env:
           PYTHONPATH: ${{ github.workspace }}
+          OPENAI_API_KEY: test
         run: pytest api/tests -q
 
   indexer-tests:
