@@ -59,7 +59,7 @@ class CLIArgs(BaseModel):
 
     once: bool = False
     chats: Optional[str] = None  # comma-separated chat names/IDs
-    days: int = 30
+    days: Optional[int] = None
     dry_run: bool = False
     limit_messages: Optional[int] = None
     embed_batch_size: Optional[int] = None

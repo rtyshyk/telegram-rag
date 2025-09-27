@@ -29,11 +29,11 @@ The latest addition provides AI-powered question answering using your indexed Te
 Index chat messages:
 
 ```
-# Index all available chats
-docker compose run --rm indexer python main.py --once --days 30 --limit-messages 50
+# Index all available chats (full history)
+docker compose run --build --rm indexer python main.py --once
 
-# Index specific chats only
-docker compose run --rm indexer python main.py --once --chats '<Saved Messages>' --days 30 --limit-messages 50
+# Index specific chats only (limit to last 30 days)
+docker compose run --build --rm indexer python main.py --once --chats '<Saved Messages>' --days 30 --limit-messages 50
 ```
 
 ### Chat API

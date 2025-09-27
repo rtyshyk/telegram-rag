@@ -30,7 +30,8 @@ class TestSearchDecisionMaker:
     def search_decision_maker(self, mock_openai_client):
         """Create SearchDecisionMaker instance with mocked client."""
         with patch("app.chat.Path.exists", return_value=True), patch(
-            "app.chat.Path.read_text", return_value="test prompt {chat_history} {question}"
+            "app.chat.Path.read_text",
+            return_value="test prompt {chat_history} {question}",
         ):
             return SearchDecisionMaker(mock_openai_client)
 
@@ -87,9 +88,7 @@ class TestSearchDecisionMaker:
         self, search_decision_maker, mock_openai_client
     ):
         """Test that search decision raises exception when API call fails."""
-        mock_openai_client.chat.completions.create.side_effect = Exception(
-            "API Error"
-        )
+        mock_openai_client.chat.completions.create.side_effect = Exception("API Error")
 
         history = [ChatMessage(role="user", content="Hello")]
 

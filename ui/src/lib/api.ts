@@ -28,6 +28,26 @@ export async function fetchModels() {
   return res.json();
 }
 
+export interface ChatInfo {
+  chat_id: string;
+  source_title?: string;
+  chat_type?: string;
+  message_count: number;
+}
+
+export async function fetchChats(): Promise<ChatInfo[]> {
+  const res = await fetch(`${API_BASE}/chats`, {
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    window.location.href = "/login";
+    return [];
+  }
+  if (!res.ok) throw res;
+  const data = await res.json();
+  return data.ok ? data.chats : [];
+}
+
 export interface SearchResult {
   id: string;
   text: string;

@@ -95,6 +95,20 @@ async def models() -> list[dict[str, str]]:
     return get_available_models()
 
 
+@app.get("/chats")
+async def chats():
+    """Get list of available chats using Vespa aggregation."""
+    try:
+        client = await get_search_client()
+        chats_list = await client.get_available_chats()
+        return {"ok": True, "chats": chats_list}
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).error(f"Failed to get chats: {e}")
+        return {"ok": False, "chats": [], "error": str(e)}
+
+
 @app.post("/search")
 async def search(req: SearchRequest):
     client = await get_search_client()
