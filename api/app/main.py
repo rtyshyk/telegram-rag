@@ -1,6 +1,12 @@
+import contextvars
+import logging
+import sys
+import uuid
+
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import (
     AuthMiddleware,
@@ -13,6 +19,52 @@ from .chat import ChatRequest, get_chat_service
 from .models import get_available_models
 from .settings import settings
 from .search import SearchRequest, get_search_client
+
+
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+_correlation_id_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "correlation_id", default=None
+)
+
+
+class CorrelationIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple
+        record.correlation_id = _correlation_id_ctx.get() or "unknown"
+        return True
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        correlation_id = request.headers.get(CORRELATION_ID_HEADER) or uuid.uuid4().hex
+        token = _correlation_id_ctx.set(correlation_id)
+        request.state.correlation_id = correlation_id
+        try:
+            response = await call_next(request)
+        except Exception:
+            _correlation_id_ctx.reset(token)
+            raise
+        response.headers[CORRELATION_ID_HEADER] = correlation_id
+        _correlation_id_ctx.reset(token)
+        return response
+
+
+def _configure_logging() -> None:
+    level_name = settings.log_level or "INFO"
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [%(name)s] [corr:%(correlation_id)s] %(message)s",
+        stream=sys.stdout,
+        force=True,
+    )
+    correlation_filter = CorrelationIdFilter()
+    root_logger = logging.getLogger()
+    root_logger.addFilter(correlation_filter)
+    for handler in root_logger.handlers:
+        handler.addFilter(correlation_filter)
+
+
+_configure_logging()
 
 app = FastAPI()
 
@@ -33,6 +85,8 @@ if settings.cors_allow_all:
 
 # Auth first (innermost)
 app.add_middleware(AuthMiddleware)
+# Correlation IDs wrap auth but stay inside CORS
+app.add_middleware(CorrelationIdMiddleware)
 # CORS last (outermost) so every response (even early auth failures) gets headers
 app.add_middleware(
     CORSMiddleware,
@@ -110,10 +164,17 @@ async def chats():
 
 
 @app.post("/search")
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, request: Request):
     client = await get_search_client()
     results = await client.search(req)
-    return {"ok": True, "results": [r.model_dump() for r in results]}
+    correlation_id = getattr(
+        request.state, "correlation_id", _correlation_id_ctx.get() or "unknown"
+    )
+    return {
+        "ok": True,
+        "results": [r.model_dump() for r in results],
+        "correlation_id": correlation_id,
+    }
 
 
 @app.post("/chat")

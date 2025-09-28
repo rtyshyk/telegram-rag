@@ -14,6 +14,7 @@ os.environ.setdefault("SESSION_SECRET", "testsecret" * 2)
 
 from app.main import app  # noqa: E402
 import app.auth as auth
+from app.search import get_search_client
 
 
 def reset_attempts():
@@ -88,3 +89,30 @@ def test_logout_clears_cookie():
     assert r.status_code == 200
     r = client.get("/models")
     assert r.status_code == 401
+
+
+def test_search_response_includes_correlation_id():
+    reset_attempts()
+    client = get_client()
+    assert login(client).status_code == 200
+
+    class _FakeSearchClient:
+        async def search(self, req):  # pragma: no cover - simple stub
+            return []
+
+    async def _override_search_client():
+        return _FakeSearchClient()
+
+    app.dependency_overrides[get_search_client] = _override_search_client
+    try:
+        response = client.post("/search", json={"q": "hello"})
+    finally:
+        app.dependency_overrides.pop(get_search_client, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["results"] == []
+    correlation_id = payload.get("correlation_id")
+    assert correlation_id
+    assert response.headers.get("X-Correlation-ID") == correlation_id

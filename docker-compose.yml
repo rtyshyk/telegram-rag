@@ -60,6 +60,9 @@ services:
   api:
     build: ./api
     env_file: .env
+    command: >-
+      bash -c "python -m app.migrate &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level debug"
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - APP_USER=${APP_USER}

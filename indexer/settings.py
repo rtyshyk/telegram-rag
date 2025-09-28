@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Chunking
     chunking_version: int = 1
     preprocess_version: int = 1
-    reply_context_tokens: int = 120
+    reply_context_tokens: int = 1000
     target_chunk_tokens: int = 1000
     chunk_overlap_tokens: int = 150
 

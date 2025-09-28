@@ -87,12 +87,15 @@ export async function search(
     chatId?: string;
     threadId?: number;
     hybrid?: boolean;
+    expansionLevel?: number;
   } = {},
 ): Promise<SearchResult[]> {
   const payload: any = { q, limit: opts.limit ?? DEFAULT_SEARCH_LIMIT };
   if (opts.chatId) payload.chat_id = opts.chatId;
   if (typeof opts.threadId === "number") payload.thread_id = opts.threadId;
   if (typeof opts.hybrid === "boolean") payload.hybrid = opts.hybrid;
+  if (typeof opts.expansionLevel === "number")
+    payload.expansion_level = opts.expansionLevel;
   const res = await fetch(`${API_BASE}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
