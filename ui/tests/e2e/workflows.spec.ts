@@ -39,6 +39,7 @@ test.describe("Chat Flow Tests", () => {
     await utils.mockNetworkError("**/auth/login");
 
     await page.goto("/login");
+    await utils.waitForLoginHydration();
     await page.fill('input[type="text"]', "admin");
     await page.fill('input[type="password"]', "admin");
     await page.click('button[type="submit"]');
@@ -51,6 +52,7 @@ test.describe("Chat Flow Tests", () => {
 
   test("accessibility workflow", async ({ page }) => {
     await page.goto("/login");
+    await utils.waitForLoginHydration();
 
     // Check accessibility
     await utils.checkAccessibility();
@@ -67,6 +69,7 @@ test.describe("Chat Flow Tests", () => {
     // Test mobile
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/login");
+    await utils.waitForLoginHydration();
     await expect(page.locator('input[type="text"]')).toBeVisible();
 
     // Test tablet
@@ -94,6 +97,7 @@ test.describe("Chat Flow Tests", () => {
   test("multiple messages workflow", async ({ page }) => {
     await utils.mockAuth();
     await page.goto("/app");
+    await utils.waitForChatHydration();
 
     // Send multiple messages
     const messages = ["Message 1", "Message 2", "Message 3"];

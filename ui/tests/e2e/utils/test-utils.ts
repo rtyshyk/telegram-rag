@@ -6,11 +6,24 @@ import { Page, expect } from "@playwright/test";
 export class TestUtils {
   constructor(private page: Page) {}
 
+  async waitForLoginHydration() {
+    const container = this.page.locator('[data-testid="login-form"]');
+    await container.waitFor();
+    await expect(container).toHaveAttribute("data-hydrated", "true");
+  }
+
+  async waitForChatHydration() {
+    const container = this.page.locator('[data-testid="chat-app"]');
+    await container.waitFor();
+    await expect(container).toHaveAttribute("data-hydrated", "true");
+  }
+
   /**
    * Perform login with given credentials
    */
   async login(username: string = "admin", password: string = "admin") {
     await this.page.goto("/login");
+    await this.waitForLoginHydration();
     await this.page.fill('input[type="text"]', username);
     await this.page.fill('input[type="password"]', password);
     await this.page.click('button[type="submit"]');
@@ -140,6 +153,7 @@ export class TestUtils {
    * Send a chat message
    */
   async sendMessage(message: string) {
+    await this.waitForChatHydration();
     await this.page.fill("textarea", message);
     await this.page.click('button:has-text("Send")');
   }

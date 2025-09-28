@@ -1,4 +1,16 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, Page } from "@playwright/test";
+
+const waitForChatHydration = async (page: Page) => {
+  const container = page.locator('[data-testid="chat-app"]');
+  await container.waitFor();
+  await expect(container).toHaveAttribute("data-hydrated", "true");
+};
+
+const waitForLoginHydration = async (page: Page) => {
+  const container = page.locator('[data-testid="login-form"]');
+  await container.waitFor();
+  await expect(container).toHaveAttribute("data-hydrated", "true");
+};
 
 test.describe("Chat Interface", () => {
   test.beforeEach(async ({ page }) => {
@@ -113,6 +125,7 @@ test.describe("Chat Interface", () => {
     });
 
     await page.goto("/app");
+    await waitForChatHydration(page);
   });
 
   test("should display chat interface", async ({ page }) => {
@@ -230,6 +243,7 @@ test.describe("Chat Interface", () => {
   test("should handle model loading error", async ({ page }) => {
     // Navigate to a fresh page and mock models API to fail
     await page.goto("/app");
+    await waitForChatHydration(page);
 
     await page.route("**/models", async (route) => {
       await route.fulfill({
@@ -238,8 +252,8 @@ test.describe("Chat Interface", () => {
         body: JSON.stringify({ detail: "unauthorized" }),
       });
     });
-
     await page.reload();
+    await waitForLoginHydration(page);
 
     // Should redirect to login on 401
     await expect(page).toHaveURL("/login");
@@ -288,6 +302,7 @@ test.describe("Chat Interface", () => {
 
     // Reload page
     await page.reload();
+    await waitForChatHydration(page);
 
     // Message should still be visible (if using session storage)
     // For now, messages are only in component state, so they'll be gone
