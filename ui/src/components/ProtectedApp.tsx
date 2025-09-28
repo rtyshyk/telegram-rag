@@ -558,9 +558,9 @@ export default function ProtectedApp() {
                       }
                       className="hover:text-blue-600 hover:underline text-left"
                     >
-                      [{citationNumber}] {" "}
-                      {citation.source_title || `Chat ${citation.chat_id}`} — {" "}
-                      {formatDate(citation.message_date)} — {" "}
+                      [{citationNumber}]{" "}
+                      {citation.source_title || `Chat ${citation.chat_id}`} —{" "}
+                      {formatDate(citation.message_date)} —{" "}
                       {formatCitationAuthor(citation)}
                     </button>
                   </div>
