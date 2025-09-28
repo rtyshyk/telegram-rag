@@ -109,6 +109,7 @@ services:
   indexer:
     build: ./indexer
     env_file: .env
+    command: ["python", "main.py"]
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - VESPA_ENDPOINT=http://vespa:8080

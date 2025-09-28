@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     tg_api_hash: str | None = None
     tg_phone: str | None = None
     telethon_session_path: str = "/sessions/telethon.session"
+    backfill_state_path: str = "/sessions/backfill_state.json"
 
     # Storage (optional for tests that mock DB)
     database_url: str | None = None
@@ -67,6 +68,14 @@ class CLIArgs(BaseModel):
     embed_concurrency: Optional[int] = None
     sleep_ms: int = 0
     log_level: str = "INFO"
+    daemon_lookback_minutes: int = 5
+    daemon_connection_check_secs: int = 60
+    daemon_worker_concurrency: int = 3
+    hourly_sweep_days: int = 7
+    hourly_sweep_interval_minutes: int = 60
+    backfill_state_path: str = settings.backfill_state_path
+    backfill_checkpoint_interval: int = 50
+    lookback_message_limit: int = 250
 
     def get_chat_list(self) -> List[str]:
         """Parse chat list from comma-separated string."""

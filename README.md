@@ -76,9 +76,11 @@ The `vespa-deploy` service waits for Vespa to become healthy and then pushes `ve
 
 ## Indexing Telegram Data
 
-### Caveats
+### Caveats & indexing modes
 
-- The long-running daemon is planned but not implemented; expect a log warning and rely on scheduled re-runs for now.
+- **Near-live daemon**: `python main.py` (no `--once`) attaches Telethon event handlers, replays the last few minutes on startup/reconnect, and streams new messages into Vespa.
+- **Initial backfill**: progress is checkpointed per chat in `/sessions/backfill_state.json` (override with `--backfill-state-path`). The daemon resumes from the last stored `message_id` automatically.
+- **Hourly sweep**: by default the daemon re-scans the last 7 days every 60 minutes to catch late edits; tune with `--hourly-sweep-days` and `--hourly-sweep-interval-minutes`.
 - Telegram deletions are intentionally ignored—once ingested, messages remain searchable to preserve historical context.
 
 - First full sync: `docker compose run --rm indexer python main.py --once`
@@ -87,7 +89,13 @@ The `vespa-deploy` service waits for Vespa to become healthy and then pushes `ve
   docker compose run --rm indexer python main.py --once \
     --chats '<Saved Messages>' --days 30 --limit-messages 50
   ```
-  NOTE: Daemon mode is not yet implemented in Phase 2; use `--once` or cron-style runs until live updates land.
+  After the backfill finishes, run the daemon without `--once` to stay current.
+
+Common daemon tuning flags:
+
+- `--daemon-lookback-minutes` (default 5) — replay window on startup/reconnect.
+- `--lookback-message-limit` (default 250) — cap per-chat catch-up volume.
+- `--backfill-checkpoint-interval` (default 50) — persist JSON progress every N messages.
 
 ## API & UI Usage
 
