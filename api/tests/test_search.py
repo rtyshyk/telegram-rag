@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -13,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-from app.search import SearchRequest, SearchResult, VespaSearchClient
+from app.search import SearchRequest, SearchResult, SearchSpan, SeedHit, VespaSearchClient
 from app.settings import settings
 
 
@@ -44,7 +46,6 @@ def search_client(
     monkeypatch.setattr(settings, "voyage_api_key", None)
     monkeypatch.setattr(settings, "embed_model", "text-embedding-3-small")
     monkeypatch.setattr(settings, "search_seed_limit", 3)
-    monkeypatch.setattr(settings, "search_seeds_per_chat", 2)
     monkeypatch.setattr(settings, "search_neighbor_min_messages", 1)
     monkeypatch.setattr(settings, "search_neighbor_message_window", 2)
     monkeypatch.setattr(settings, "search_neighbor_time_window_minutes", 10)
@@ -99,6 +100,61 @@ def make_message(
     return {"fields": fields}
 
 
+def test_seed_dedupe_keeps_highest_scoring_within_gap(
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "search_seed_dedupe_message_gap", 5)
+    monkeypatch.setattr(settings, "search_seed_dedupe_time_gap_seconds", 0)
+
+    client = VespaSearchClient(http=mock_http)
+    client.embedder = mock_embedder
+
+    seeds = [
+        SeedHit(
+            id="chat:high-score",
+            chat_id="chat",
+            message_id=100,
+            message_date_ms=1_600_000_000_000,
+            text="Older high score",
+            score=50.0,
+            fields={"message_date": 1_600_000_000_000},
+        ),
+        SeedHit(
+            id="chat:recent-lower",
+            chat_id="chat",
+            message_id=103,
+            message_date_ms=1_700_000_000_000,
+            text="Recent lower score",
+            score=30.0,
+            fields={"message_date": 1_700_000_000_000},
+        ),
+        SeedHit(
+            id="chat:far-mid",
+            chat_id="chat",
+            message_id=120,
+            message_date_ms=1_800_000_000_000,
+            text="Far mid score",
+            score=40.0,
+            fields={"message_date": 1_800_000_000_000},
+        ),
+    ]
+
+    filtered = client._filter_seeds(seeds)
+    filtered_ids = [seed.id for seed in filtered]
+
+    assert filtered_ids == ["chat:high-score", "chat:far-mid"]
+
+
+def test_search_request_expansion_level_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "search_expansion_max_level", 2)
+    req_high = SearchRequest(q="x", expansion_level=5)
+    assert req_high.expansion_level == 2
+    req_low = SearchRequest(q="x", expansion_level=-3)
+    assert req_low.expansion_level == 0
+
+
 @pytest.mark.asyncio
 async def test_returns_empty_for_blank_query(
     search_client: VespaSearchClient, mock_http: AsyncMock
@@ -106,6 +162,212 @@ async def test_returns_empty_for_blank_query(
     results = await search_client.search(SearchRequest(q="   "))
     assert results == []
     mock_http.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_broaden_raises_result_cap(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "search_seed_limit", 80)
+
+    total_seeds = settings.search_default_limit + (
+        2 * settings.search_expansion_result_step
+    ) + 5
+    seeds = [
+        make_seed(
+            f"chat-{idx}",
+            idx,
+            text=f"Seed {idx}",
+            score=100 - idx,
+            timestamp_ms=1695759000000 + idx,
+        )
+        for idx in range(total_seeds)
+    ]
+
+    mock_http.post.return_value = async_response({"root": {"children": seeds}})
+
+    def _fake_candidate(seed, trace: bool = False):
+        return SearchResult(
+            id=seed.id,
+            text=seed.text,
+            chat_id=seed.chat_id,
+            message_id=seed.message_id,
+            score=seed.score,
+            seed_score=seed.score,
+            retrieval_score=seed.score,
+            span=SearchSpan(
+                start_id=seed.message_id,
+                end_id=seed.message_id,
+                start_ts=seed.message_date_ms,
+                end_ts=seed.message_date_ms,
+            ),
+            message_count=1,
+        )
+
+    monkeypatch.setattr(
+        search_client,
+        "_build_candidate",
+        AsyncMock(side_effect=_fake_candidate),
+    )
+
+    req = SearchRequest(q="broaden me", expansion_level=2)
+    results = await search_client.search(req)
+
+    expected_limit = min(
+        settings.search_default_limit + (2 * settings.search_expansion_result_step),
+        settings.search_context_max_return,
+    )
+    assert len(results) == expected_limit
+    assert [res.seed_score for res in results] == sorted(
+        (res.seed_score for res in results), reverse=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_results_sorted_by_score_then_recency(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "search_seed_limit", 5)
+
+    base_ts = 1700000000000
+    seeds = [
+        make_seed(
+            "chat-x",
+            1,
+            text="older high score",
+            score=0.9,
+            timestamp_ms=base_ts,
+        ),
+        make_seed(
+            "chat-x",
+            2,
+            text="newer high score",
+            score=0.9,
+            timestamp_ms=base_ts + 5000,
+        ),
+        make_seed(
+            "chat-x",
+            3,
+            text="mid score",
+            score=0.7,
+            timestamp_ms=base_ts + 10000,
+        ),
+        make_seed(
+            "chat-x",
+            4,
+            text="low score",
+            score=0.2,
+            timestamp_ms=base_ts + 15000,
+        ),
+    ]
+
+    mock_http.post.return_value = async_response({"root": {"children": seeds}})
+
+    def _fake_candidate(seed, trace: bool = False):
+        return SearchResult(
+            id=seed.id,
+            text=seed.text,
+            chat_id=seed.chat_id,
+            message_id=seed.message_id,
+            score=seed.score,
+            seed_score=seed.score,
+            retrieval_score=seed.score,
+            span=SearchSpan(
+                start_id=seed.message_id,
+                end_id=seed.message_id,
+                start_ts=seed.message_date_ms,
+                end_ts=seed.message_date_ms,
+            ),
+            message_count=1,
+        )
+
+    monkeypatch.setattr(
+        search_client,
+        "_build_candidate",
+        AsyncMock(side_effect=_fake_candidate),
+    )
+
+    results = await search_client.search(SearchRequest(q="ordering"))
+
+    ordered_ids = [res.id for res in results]
+    assert ordered_ids[:3] == [
+        seeds[1]["fields"]["id"],
+        seeds[0]["fields"]["id"],
+        seeds[2]["fields"]["id"],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_trace_logging_emits_stages(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(settings, "search_seed_limit", 2)
+
+    seed_payload = {
+        "root": {
+            "children": [
+                make_seed(
+                    "chat-trace",
+                    1,
+                    text="Seed message",
+                    score=0.9,
+                    timestamp_ms=1700000000000,
+                )
+            ]
+        }
+    }
+    neighbor_payload = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-trace",
+                    1,
+                    text="Neighbor context",
+                    timestamp_ms=1700000001000,
+                )
+            ]
+        }
+    }
+
+    mock_http.post.side_effect = [
+        async_response(seed_payload),
+        async_response(neighbor_payload),
+    ]
+
+    caplog.set_level(logging.DEBUG)
+    await search_client.search(SearchRequest(q="trace", trace=True))
+
+    stages: list[str] = []
+    for record in caplog.records:
+        if record.levelno != logging.DEBUG:
+            continue
+        try:
+            payload = json.loads(record.message)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        stage_name = payload.get("stage")
+        if isinstance(stage_name, str):
+            stages.append(stage_name)
+
+    expected_stages = {
+        "vespa_results",
+        "seed_list",
+        "seed_list_deduped",
+        "rerank_results",
+        "gpt_context",
+    }
+
+    assert set(stages) == expected_stages
 
 
 @pytest.mark.asyncio
@@ -322,19 +584,6 @@ async def test_rerank_stub_orders_by_overlap(
     assert "11:34" in results[0].text
     assert results[0].score >= results[1].score
     assert results[0].rerank_score is not None
-
-
-@pytest.mark.asyncio
-async def test_cyrillic_query_expansion_injects_variants(
-    search_client: VespaSearchClient,
-    mock_embedder: AsyncMock,
-) -> None:
-    req = SearchRequest(q="коли іра прилітає з катовіце?", hybrid=True, limit=5)
-    _, body, _ = await search_client._build_query(req)
-
-    assert "прилітаєш" in body["q"]
-    assert body.get("input.language") == "uk"
-    mock_embedder.embed.assert_awaited_once_with("коли іра прилітає з катовіце?")
 
 
 @pytest.mark.asyncio

@@ -7,12 +7,18 @@ import {
   SearchResult,
   chatStream,
   ChatCitation,
-  ChatStreamChunk,
-  ChatMessage,
   ChatUsage,
   DEFAULT_SEARCH_LIMIT,
 } from "../lib/api";
 import { formatTelegramLink } from "../lib/telegram_links";
+
+const MAX_SEARCH_EXPANSION_LEVEL = 3;
+const SEARCH_EXPANSION_STEP = Math.max(1, DEFAULT_SEARCH_LIMIT);
+
+type ConversationHistoryEntry = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 interface Message {
   id: string;
@@ -67,6 +73,7 @@ export default function ProtectedApp() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(true);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>("");
+  const [searchExpansionLevel, setSearchExpansionLevel] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [selectedChat, setSelectedChat] = useState<string>("");
   const [chatError, setChatError] = useState<string | null>(null);
@@ -102,18 +109,55 @@ export default function ProtectedApp() {
     return results.map((result) => ({ ...result }));
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      window.location.href = "/login";
+    }
+  };
+
+  const limitForLevel = (level: number) =>
+    DEFAULT_SEARCH_LIMIT + level * SEARCH_EXPANSION_STEP;
+
   const runSearch = async (
     q: string,
-    opts: { preserveOnEmpty?: boolean } = {},
+    opts: {
+      preserveOnEmpty?: boolean;
+      expansionLevel?: number;
+      resetExpansion?: boolean;
+    } = {},
   ) => {
     const trimmed = q.trim();
+    const requestedLevel =
+      opts.expansionLevel ?? (opts.resetExpansion ? 0 : searchExpansionLevel);
+    const effectiveLevel = Math.min(
+      Math.max(requestedLevel, 0),
+      MAX_SEARCH_EXPANSION_LEVEL,
+    );
+
     if (!trimmed) {
       if (!opts.preserveOnEmpty) {
-        // User manually cleared input: clear panel
+        // User manually cleared input: clear panel and reset scope
         setSearchResults([]);
         setCurrentSearchQuery("");
+        if (searchExpansionLevel !== 0) {
+          setSearchExpansionLevel(0);
+        }
+      } else if (
+        (opts.expansionLevel !== undefined || opts.resetExpansion) &&
+        searchExpansionLevel !== effectiveLevel
+      ) {
+        setSearchExpansionLevel(effectiveLevel);
       }
       return;
+    }
+
+    if (
+      (opts.expansionLevel !== undefined || opts.resetExpansion) &&
+      searchExpansionLevel !== effectiveLevel
+    ) {
+      setSearchExpansionLevel(effectiveLevel);
     }
 
     const seq = ++searchSeqRef.current; // capture sequence id
@@ -121,7 +165,11 @@ export default function ProtectedApp() {
     setSearchError(null);
     setCurrentSearchQuery(trimmed);
     try {
-      const searchOpts: any = { limit: DEFAULT_SEARCH_LIMIT, hybrid: true };
+      const searchOpts: any = {
+        limit: limitForLevel(effectiveLevel),
+        hybrid: true,
+        expansionLevel: effectiveLevel,
+      };
       if (selectedChat) {
         searchOpts.chatId = selectedChat;
       }
@@ -138,79 +186,55 @@ export default function ProtectedApp() {
     }
   };
 
-  // Re-run the most recent query when the chat filter changes
-  useEffect(() => {
-    if (!currentSearchQuery.trim()) return;
-    runSearch(currentSearchQuery, { preserveOnEmpty: true });
-  }, [selectedChat]);
-
-  const handleSend = async (message: string) => {
-    if (!message.trim() || isLoading) return;
-
-    setIsLoading(true);
+  const streamAssistantResponse = async ({
+    prompt,
+    history,
+    assistantMessageId,
+    modelId,
+    chatId,
+  }: {
+    prompt: string;
+    history: ConversationHistoryEntry[];
+    assistantMessageId: string;
+    modelId?: string;
+    chatId?: string;
+  }) => {
     setChatError(null);
+    setIsLoading(true);
 
-    // Add only the user message now; delay assistant bubble until first content token
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: message,
-      timestamp: new Date(),
-    };
-    const assistantMessageId = (Date.now() + 1).toString();
     let assistantAdded = false;
+    let fullContent = "";
+    let finalCitations: ChatCitation[] = [];
+    let finalUsage: ChatUsage | undefined;
+    let finalTiming: number | undefined;
+    let reformulatedQuery = "";
+    let loadingCleared = false;
 
-    setMessages((prev) => [...prev, userMessage]);
+    const chatOpts: any = {
+      model_id: modelId,
+      history,
+    };
 
-    // Update search panel to show relevant full messages for the just-sent query (before clearing input)
-    try {
-      await runSearch(message, { preserveOnEmpty: true });
-    } catch {
-      // ignore search errors here; main chat flow continues
-    }
-    setInput("");
-
-    // Extract conversation history
-    const history = messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-
-    try {
-      let fullContent = "";
-      let finalCitations: ChatCitation[] = [];
-      let finalUsage: ChatUsage | undefined;
-      let finalTiming: number | undefined;
-      let reformulatedQuery = "";
-
-      console.log("Starting chat stream with history:", history);
-
-      // Build chat options with filter
-      const chatOpts: any = {
-        model_id: selectedModel,
-        history: history,
+    if (chatId) {
+      chatOpts.filters = {
+        chat_ids: [chatId],
       };
+    }
 
-      if (selectedChat) {
-        chatOpts.filters = {
-          chat_ids: [selectedChat],
-        };
-      }
-
-      for await (const chunk of chatStream(message, chatOpts)) {
-        console.log("Received chunk:", chunk);
-
+    try {
+      for await (const chunk of chatStream(prompt, chatOpts)) {
         if (chunk.type === "reformulate") {
           if (chunk.reformulated_query) {
             reformulatedQuery = chunk.reformulated_query;
-            console.log("Query reformulated:", reformulatedQuery);
           }
         } else if (chunk.type === "content") {
           if (chunk.content) {
-            // First token: create assistant message and remove typing indicator
+            if (!loadingCleared) {
+              setIsLoading(false);
+              loadingCleared = true;
+            }
             if (!assistantAdded) {
               assistantAdded = true;
-              setIsLoading(false); // hide typing indicator once real content starts
               fullContent = chunk.content;
               setMessages((prev) => [
                 ...prev,
@@ -234,15 +258,12 @@ export default function ProtectedApp() {
           }
         } else if (chunk.type === "citations") {
           if (chunk.citations) finalCitations = chunk.citations;
-          // Fire a search using the (possibly) reformulated query so the side panel reflects actual context
-          const qForPanel = reformulatedQuery.trim() || message;
+          const qForPanel = reformulatedQuery.trim() || prompt;
           runSearch(qForPanel, { preserveOnEmpty: true });
         } else if (chunk.type === "end") {
           if (chunk.usage) finalUsage = chunk.usage;
           if (chunk.timing_seconds) finalTiming = chunk.timing_seconds;
-          // Final update with all metadata (may still be empty content)
           if (!assistantAdded) {
-            // No content streamed; create an (empty) assistant message to attach metadata
             assistantAdded = true;
             setMessages((prev) => [
               ...prev,
@@ -268,25 +289,21 @@ export default function ProtectedApp() {
                       usage: finalUsage,
                       timing_seconds: finalTiming,
                       reformulated_query: reformulatedQuery,
+                      timestamp: new Date(),
                     }
                   : msg,
               ),
             );
           }
-          // Ensure final panel populated even if no citations chunk arrived earlier
-          const qForPanel = reformulatedQuery.trim() || message;
+          const qForPanel = reformulatedQuery.trim() || prompt;
           runSearch(qForPanel, { preserveOnEmpty: true });
         } else if (chunk.type === "error") {
           throw new Error(chunk.content || "Unknown streaming error");
         }
       }
-
-      // No additional fallback injection; an empty assistant message signals no content was produced
     } catch (error: any) {
-      setChatError(error?.message || "Chat request failed");
-
-      // Update the assistant message with error content
-      // If assistant message already added, update it; else create error message
+      const message = error?.message || "Chat request failed";
+      setChatError(message);
       setMessages((prev) => {
         const exists = prev.some((m) => m.id === assistantMessageId);
         if (!exists) {
@@ -295,9 +312,7 @@ export default function ProtectedApp() {
             {
               id: assistantMessageId,
               role: "assistant",
-              content: `Error: ${
-                error?.message || "Failed to generate response"
-              }`,
+              content: `Error: ${message}`,
               timestamp: new Date(),
             },
           ];
@@ -306,9 +321,12 @@ export default function ProtectedApp() {
           msg.id === assistantMessageId
             ? {
                 ...msg,
-                content: `Error: ${
-                  error?.message || "Failed to generate response"
-                }`,
+                content: `Error: ${message}`,
+                citations: undefined,
+                usage: undefined,
+                timing_seconds: undefined,
+                reformulated_query: undefined,
+                timestamp: new Date(),
               }
             : msg,
         );
@@ -318,12 +336,129 @@ export default function ProtectedApp() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } finally {
-      window.location.href = "/login";
+  const regenerateLastAssistantResponse = async () => {
+    if (isLoading) return;
+    if (messages.length === 0) return;
+
+    const lastUserIndex = (() => {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i].role === "user") {
+          return i;
+        }
+      }
+      return -1;
+    })();
+
+    if (lastUserIndex === -1) return;
+
+    const lastAssistantIndex = (() => {
+      for (let i = messages.length - 1; i > lastUserIndex; i -= 1) {
+        if (messages[i].role === "assistant") {
+          return i;
+        }
+      }
+      return -1;
+    })();
+
+    const prompt = messages[lastUserIndex]?.content.trim();
+    if (!prompt) return;
+
+    const historyEntries: ConversationHistoryEntry[] = messages
+      .slice(0, lastUserIndex)
+      .map((msg) => ({ role: msg.role, content: msg.content }));
+
+    if (lastAssistantIndex !== -1) {
+      const updatedMessages = [
+        ...messages.slice(0, lastAssistantIndex),
+        ...messages.slice(lastAssistantIndex + 1),
+      ];
+      setMessages(updatedMessages);
     }
+
+    const assistantMessageId = `${Date.now()}-regen`;
+
+    await streamAssistantResponse({
+      prompt,
+      history: historyEntries,
+      assistantMessageId,
+      modelId: selectedModel,
+      chatId: selectedChat,
+    });
+  };
+
+  const handleBroadenSearch = async () => {
+    if (searchLoading || isLoading) return;
+    const query = currentSearchQuery.trim();
+    if (!query) return;
+    if (searchExpansionLevel >= MAX_SEARCH_EXPANSION_LEVEL) return;
+    const nextLevel = Math.min(
+      searchExpansionLevel + 1,
+      MAX_SEARCH_EXPANSION_LEVEL,
+    );
+    await runSearch(query, { preserveOnEmpty: true, expansionLevel: nextLevel });
+    await regenerateLastAssistantResponse();
+  };
+
+  const handleResetSearchScope = async () => {
+    if (searchExpansionLevel === 0 || searchLoading || isLoading) return;
+    const query = currentSearchQuery.trim();
+    if (!query) {
+      setSearchExpansionLevel(0);
+      return;
+    }
+    await runSearch(query, {
+      preserveOnEmpty: true,
+      expansionLevel: 0,
+      resetExpansion: true,
+    });
+    await regenerateLastAssistantResponse();
+  };
+
+  // Re-run the most recent query when the chat filter changes
+  useEffect(() => {
+    if (!currentSearchQuery.trim()) return;
+    runSearch(currentSearchQuery, { preserveOnEmpty: true });
+  }, [selectedChat]);
+
+  const handleSend = async (message: string) => {
+    if (!message.trim() || isLoading) return;
+
+    setIsLoading(true);
+    setChatError(null);
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: message,
+      timestamp: new Date(),
+    };
+    const assistantMessageId = (Date.now() + 1).toString();
+
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      await runSearch(message, {
+        preserveOnEmpty: true,
+        expansionLevel: 0,
+        resetExpansion: true,
+      });
+    } catch {
+      // ignore search errors here; main chat flow continues
+    }
+    setInput("");
+
+    const history = messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    await streamAssistantResponse({
+      prompt: message,
+      history,
+      assistantMessageId,
+      modelId: selectedModel,
+      chatId: selectedChat,
+    });
   };
 
   const formatTime = (date: Date) => {
@@ -438,6 +573,22 @@ export default function ProtectedApp() {
     );
   };
 
+  const scopeLabel =
+    searchExpansionLevel === 0
+      ? "Standard scope"
+      : `Broadened ×${searchExpansionLevel}`;
+  const canBroadenSearch =
+    !!currentSearchQuery.trim() &&
+    !searchLoading &&
+    !isLoading &&
+    searchExpansionLevel < MAX_SEARCH_EXPANSION_LEVEL;
+  const nextScopeLevel = Math.min(
+    searchExpansionLevel + 1,
+    MAX_SEARCH_EXPANSION_LEVEL,
+  );
+  const requestedLimit = limitForLevel(searchExpansionLevel);
+  const nextScopeLimit = limitForLevel(nextScopeLevel);
+
   return (
     <div
       className="flex flex-col h-screen bg-gray-50"
@@ -452,7 +603,9 @@ export default function ProtectedApp() {
           <ChatSelector value={selectedChat} onChatChange={setSelectedChat} />
           {messages.length > 0 && (
             <button
-              onClick={() => setMessages([])}
+              onClick={() => {
+                setMessages([]);
+              }}
               className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300"
             >
               Clear Chat
@@ -643,6 +796,30 @@ export default function ProtectedApp() {
                     }"`}
                 </p>
               )}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">
+                  {scopeLabel} • targeting up to {requestedLimit} snippet
+                  {requestedLimit !== 1 ? "s" : ""}
+                </span>
+                <button
+                  onClick={() => void handleBroadenSearch()}
+                  disabled={!canBroadenSearch}
+                  className="text-xs px-2 py-1.5 rounded-lg border border-blue-200 text-blue-600 font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Fetch more seeds and rerank more candidates"
+                >
+                  {searchExpansionLevel >= MAX_SEARCH_EXPANSION_LEVEL
+                    ? "Max scope"
+                    : `Broaden to ${nextScopeLimit}`}
+                </button>
+                {searchExpansionLevel > 0 && (
+                  <button
+                    onClick={() => void handleResetSearchScope()}
+                    className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 text-gray-600 font-medium hover:bg-gray-100"
+                  >
+                    Reset scope
+                  </button>
+                )}
+              </div>
             </div>
             <button
               onClick={() => setShowContext(!showContext)}
@@ -849,6 +1026,9 @@ export default function ProtectedApp() {
                 if (!nextValue.trim()) {
                   setSearchResults([]);
                   setCurrentSearchQuery("");
+                  if (searchExpansionLevel !== 0) {
+                    setSearchExpansionLevel(0);
+                  }
                 }
               }}
               onKeyDown={(e) => {

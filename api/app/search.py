@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
-import unicodedata
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from .settings import settings
 
@@ -19,10 +19,19 @@ logger = logging.getLogger(__name__)
 
 class SearchRequest(BaseModel):
     q: str
-    limit: int = settings.search_default_limit
+    limit: int = Field(default=settings.search_default_limit, ge=1)
     chat_id: Optional[str] = None
     thread_id: Optional[int] = None
     hybrid: bool = True
+    expansion_level: int = 0
+    trace: bool = False
+
+    @field_validator("expansion_level")
+    @classmethod
+    def _clamp_expansion(cls, value: int) -> int:
+        if value < 0:
+            return 0
+        return min(value, settings.search_expansion_max_level)
 
 
 class SearchSpan(BaseModel):
@@ -251,6 +260,7 @@ class VoyageReranker:
 
 class VespaSearchClient:
     _CYRILLIC_RE = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
+    _LOG_VECTOR_MARKERS = ("vector", "embedding")
     _TOKEN_RE = re.compile(r"[0-9A-Za-z\u0400-\u04FF]+", re.UNICODE)
 
     def __init__(self, http: Optional[httpx.AsyncClient] = None):
@@ -264,6 +274,47 @@ class VespaSearchClient:
             if reranker.enabled:
                 self.reranker = reranker
 
+    def _log_stage(self, stage: str, payload: Any | None) -> None:
+        if payload is None:
+            payload = {}
+        serialised = self._serialise_for_log(payload)
+        try:
+            message = json.dumps(
+                {"stage": stage, "payload": serialised},
+                ensure_ascii=False,
+                indent=2,
+            )
+        except TypeError:
+            message = json.dumps(
+                {"stage": stage, "payload": str(serialised)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        logger.debug(message)
+
+    def _serialise_for_log(self, value: Any) -> Any:
+        if isinstance(value, BaseModel):
+            return self._serialise_for_log(value.model_dump())
+        if is_dataclass(value):
+            return self._serialise_for_log(asdict(value))
+        if isinstance(value, dict):
+            serialised: Dict[Any, Any] = {}
+            for key, val in value.items():
+                if (
+                    isinstance(key, str)
+                    and any(marker in key.lower() for marker in self._LOG_VECTOR_MARKERS)
+                    and isinstance(val, (list, tuple, set, dict))
+                ):
+                    serialised[key] = "[redacted vector]"
+                    continue
+                serialised[key] = self._serialise_for_log(val)
+            return serialised
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialise_for_log(v) for v in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
     async def close(self):
         await self.http.aclose()
         if self.reranker:
@@ -274,8 +325,24 @@ class VespaSearchClient:
         if not query:
             return []
 
-        final_limit = max(1, min(req.limit, settings.search_context_max_return))
-        seed_limit = max(settings.search_seed_limit, final_limit)
+        expansion_level = max(
+            0, min(req.expansion_level, settings.search_expansion_max_level)
+        )
+
+        base_limit = max(1, min(req.limit, settings.search_context_max_return))
+        if expansion_level > 0 and req.limit == settings.search_default_limit:
+            expanded_limit = base_limit + (
+                expansion_level * settings.search_expansion_result_step
+            )
+            final_limit = min(expanded_limit, settings.search_context_max_return)
+        else:
+            final_limit = base_limit
+
+        base_seed_limit = settings.search_seed_limit
+        seed_limit = max(
+            final_limit,
+            base_seed_limit + expansion_level * settings.search_expansion_seed_step,
+        )
 
         seed_request = (
             req
@@ -283,30 +350,36 @@ class VespaSearchClient:
             else req.model_copy(update={"limit": seed_limit})
         )
 
-        yql, body, _ = await self._build_query(seed_request)
+        _, body, _ = await self._build_query(seed_request)
 
         try:
             data = await self._execute_search(body)
         except Exception as exc:
             logger.error("Vespa search error: %s", exc)
             return []
+        root = data.get("root", {}) or {}
+        raw_hits = root.get("children", []) or []
+        self._log_stage("vespa_results", {"raw_hits": raw_hits})
 
-        logger.debug(
-            "seed_yql=%s hits_field=%s",
-            yql,
-            data.get("root", {}).get("fields", {}),
-        )
+        seed_hits = self._parse_seed_hits(raw_hits)
+        self._log_stage("seed_list", {"seeds": seed_hits})
 
-        seed_hits = self._parse_seed_hits(data.get("root", {}).get("children", []))
         filtered_seeds = self._filter_seeds(seed_hits)
+        self._log_stage("seed_list_deduped", {"seeds": filtered_seeds})
 
         if not filtered_seeds:
+            rerank_status = bool(self.reranker and self.reranker.enabled)
+            self._log_stage(
+                "rerank_results",
+                {"rerank_enabled": rerank_status, "results": []},
+            )
+            self._log_stage("gpt_context", [])
             return []
 
-        candidates: List[SearchResult] = []
         expand_tasks = [self._build_candidate(seed) for seed in filtered_seeds]
         expanded = await asyncio.gather(*expand_tasks, return_exceptions=True)
 
+        candidates: List[SearchResult] = []
         for seed, result in zip(filtered_seeds, expanded):
             if isinstance(result, Exception):
                 logger.warning(
@@ -321,16 +394,57 @@ class VespaSearchClient:
             candidates.append(result)
 
         if not candidates:
+            rerank_status = bool(self.reranker and self.reranker.enabled)
+            self._log_stage(
+                "rerank_results",
+                {"rerank_enabled": rerank_status, "results": []},
+            )
+            self._log_stage("gpt_context", [])
             return []
 
-        candidates.sort(key=lambda c: c.seed_score, reverse=True)
+        candidates.sort(
+            key=lambda c: (
+                c.message_date or 0,
+                c.seed_score,
+            ),
+            reverse=True,
+        )
 
         reranker = self.reranker
-        if reranker and reranker.enabled:
-            limited_candidates = candidates[: settings.rerank_candidate_limit]
-            return await reranker.rerank(query, limited_candidates, final_limit)
+        rerank_enabled = bool(reranker and reranker.enabled)
+        if rerank_enabled:
+            rerank_cap = max(
+                final_limit,
+                settings.rerank_candidate_limit
+                + expansion_level * settings.search_expansion_rerank_step,
+            )
+            limited_candidates = candidates[:rerank_cap]
+            rerank_results = await reranker.rerank(query, limited_candidates, final_limit)
+        else:
+            rerank_results = candidates
 
-        return candidates[:final_limit]
+        self._log_stage(
+            "rerank_results",
+            {"rerank_enabled": rerank_enabled, "results": rerank_results},
+        )
+
+        final_candidates = rerank_results[:final_limit]
+        self._log_stage(
+            "gpt_context",
+            [
+                {
+                    "chat_id": result.chat_id,
+                    "message_id": result.message_id,
+                    "text": result.text,
+                    "span": result.span.model_dump(),
+                    "score": result.score,
+                    "seed_score": result.seed_score,
+                    "rerank_score": result.rerank_score,
+                }
+                for result in final_candidates
+            ],
+        )
+        return final_candidates
 
     async def _execute_search(self, body: Dict[str, Any]) -> Dict[str, Any]:
         resp = await self.http.post(f"{self.endpoint}/search/", json=body)
@@ -375,21 +489,22 @@ class VespaSearchClient:
         if not seeds:
             return []
 
-        per_chat = max(1, settings.search_seeds_per_chat)
         id_gap = max(0, settings.search_seed_dedupe_message_gap)
         time_gap_ms = max(0, settings.search_seed_dedupe_time_gap_seconds) * 1000
 
-        sorted_seeds = sorted(seeds, key=lambda seed: seed.score, reverse=True)
-        selected_by_chat: Dict[str, List[SeedHit]] = {}
+        sorted_seeds = sorted(
+            seeds,
+            key=lambda seed: (
+                seed.score,
+                seed.message_date_ms or 0,
+            ),
+            reverse=True,
+        )
         selected: List[SeedHit] = []
 
         for seed in sorted_seeds:
-            chat_selected = selected_by_chat.setdefault(seed.chat_id, [])
-            if len(chat_selected) >= per_chat:
-                continue
-
             too_close = False
-            for existing in chat_selected:
+            for existing in selected:
                 if id_gap and abs(seed.message_id - existing.message_id) <= id_gap:
                     too_close = True
                     break
@@ -406,27 +521,20 @@ class VespaSearchClient:
             if too_close:
                 continue
 
-            chat_selected.append(seed)
             selected.append(seed)
 
         if selected:
             return selected
 
-        # Fallback: ensure at least one seed per chat if dedupe removed all
-        fallback: List[SeedHit] = []
-        seen_chats: set[str] = set()
-        for seed in sorted_seeds:
-            if seed.chat_id in seen_chats:
-                continue
-            seen_chats.add(seed.chat_id)
-            fallback.append(seed)
-        return fallback
+        # Fallback: ensure at least one seed survives if dedupe removed all
+        return sorted_seeds[:1]
 
     async def _build_candidate(self, seed: SeedHit) -> Optional[SearchResult]:
         neighbors = await self._fetch_neighbors(seed)
         if not neighbors:
             return None
-        return self._assemble_candidate(seed, neighbors)
+        candidate = self._assemble_candidate(seed, neighbors)
+        return candidate
 
     async def _fetch_neighbors(self, seed: SeedHit) -> List[MessageRecord]:
         window = max(0, settings.search_neighbor_message_window)
@@ -534,7 +642,9 @@ class VespaSearchClient:
         return result
 
     def _assemble_candidate(
-        self, seed: SeedHit, messages: Sequence[MessageRecord]
+        self,
+        seed: SeedHit,
+        messages: Sequence[MessageRecord],
     ) -> Optional[SearchResult]:
         if not messages:
             return None
@@ -654,7 +764,7 @@ class VespaSearchClient:
         ]
         has_link_value = any(link_values) if link_values else None
 
-        return SearchResult(
+        result = SearchResult(
             id=f"{seed.chat_id}:{span.start_id}-{span.end_id}",
             text=text_block,
             chat_id=seed.chat_id,
@@ -675,6 +785,7 @@ class VespaSearchClient:
             thread_id=thread_id,
             has_link=has_link_value,
         )
+        return result
 
     def _format_message_line(self, msg: MessageRecord) -> str:
         text = msg.text.strip()
@@ -688,7 +799,7 @@ class VespaSearchClient:
         return " ".join(value.split())
 
     def _prepare_bm25_query(self, query: str) -> tuple[str, Optional[str]]:
-        """Normalise query for BM25 and add helpful inflection variants."""
+        """Normalise query for BM25 and compute language hints."""
 
         cleaned = self._normalise_whitespace(query)
         if not cleaned:
@@ -698,56 +809,9 @@ class VespaSearchClient:
         if not tokens:
             return cleaned, None
 
-        seen_tokens = set(tokens)
-        extra_tokens: List[str] = []
-        uses_cyrillic = False
-
-        for token in tokens:
-            if self._CYRILLIC_RE.search(token):
-                uses_cyrillic = True
-            for variant in self._expand_token_variants(token):
-                if variant not in seen_tokens:
-                    seen_tokens.add(variant)
-                    extra_tokens.append(variant)
-
-        if extra_tokens:
-            cleaned = " ".join([cleaned, " ".join(extra_tokens)]).strip()
-
+        uses_cyrillic = any(self._CYRILLIC_RE.search(token) for token in tokens)
         language_hint = "uk" if uses_cyrillic else None
         return cleaned, language_hint
-
-    def _expand_token_variants(self, token: str) -> List[str]:
-        """Generate lightweight morphological variants for better recall."""
-
-        variants: List[str] = []
-
-        def add_variant(value: str) -> None:
-            candidate = value.strip()
-            if not candidate or candidate == token or candidate in variants:
-                return
-            variants.append(candidate)
-
-        ascii_variant = (
-            unicodedata.normalize("NFKD", token)
-            .encode("ascii", "ignore")
-            .decode("ascii")
-            .lower()
-        )
-        if ascii_variant and ascii_variant != token:
-            add_variant(ascii_variant)
-
-        if self._CYRILLIC_RE.search(token):
-            base = token.rstrip("ь")
-            if base.endswith("є") or base.endswith("е"):
-                add_variant(f"{base}ш")
-                if len(base) >= 4:
-                    add_variant(f"{base}те")
-            if base.endswith("єш") and len(base) > 3:
-                add_variant(base[:-1])
-            if token.endswith("ш") and len(token) > 3:
-                add_variant(token[:-1])
-
-        return variants
 
     def _safe_text(self, value: Any) -> str:
         if value is None:
