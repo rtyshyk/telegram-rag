@@ -49,6 +49,12 @@ class TelethonClientWrapper:
         if not settings.telethon_stub:
             await self.client.disconnect()
 
+    def is_connected(self) -> bool:
+        """Return connection status for the underlying client."""
+        if settings.telethon_stub:
+            return True
+        return self.client.is_connected()
+
     async def resolve_chats(self, chat_names: List[str]) -> Dict[str, Any]:
         """
         Resolve chat names/IDs to entities.
@@ -166,6 +172,7 @@ class TelethonClientWrapper:
         limit: Optional[int] = None,
         since_date: Optional[datetime] = None,
         reverse: bool = False,
+        min_message_id: Optional[int] = None,
     ) -> AsyncGenerator[Message, None]:
         """
         Get messages from a chat.
@@ -177,7 +184,9 @@ class TelethonClientWrapper:
             reverse: If True, fetch from oldest to newest
         """
         if settings.telethon_stub:
-            async for msg in self._stub_get_messages(entity, limit, since_date):
+            async for msg in self._stub_get_messages(
+                entity, limit, since_date, min_message_id
+            ):
                 yield msg
             return
 
@@ -191,6 +200,8 @@ class TelethonClientWrapper:
                 kwargs["limit"] = limit
             if since_date:
                 kwargs["offset_date"] = since_date
+            if min_message_id is not None:
+                kwargs["min_id"] = min_message_id
 
             async for message in self.client.iter_messages(entity, **kwargs):
                 # Skip service messages that we can't process
@@ -286,7 +297,11 @@ class TelethonClientWrapper:
         return resolved
 
     async def _stub_get_messages(
-        self, entity: Any, limit: Optional[int], since_date: Optional[datetime]
+        self,
+        entity: Any,
+        limit: Optional[int],
+        since_date: Optional[datetime],
+        min_message_id: Optional[int],
     ) -> AsyncGenerator[Any, None]:
         """Stub implementation for testing."""
         # Generate fake messages

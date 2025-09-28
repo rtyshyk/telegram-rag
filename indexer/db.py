@@ -43,7 +43,7 @@ except Exception:  # ImportError or build-time failure
 
     asyncpg = SimpleNamespace(create_pool=create_pool, Pool=_StubPool)  # type: ignore
 
-from models import TgSyncState, EmbeddingCache, Chunk
+from models import EmbeddingCache, Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +83,6 @@ class DatabaseManager:
     async def create_tables(self):
         """Create required tables."""
         sql = """
-        -- Track per-chat sync state
-        CREATE TABLE IF NOT EXISTS tg_sync_state (
-          chat_id TEXT PRIMARY KEY,
-          last_message_id BIGINT,
-          last_edit_ts BIGINT,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
         -- Embedding cache
         CREATE TABLE IF NOT EXISTS embedding_cache (
           text_hash TEXT PRIMARY KEY,
@@ -130,34 +122,6 @@ class DatabaseManager:
             await conn.execute(sql)
 
         logger.info("Database tables created/verified")
-
-    async def get_sync_state(self, chat_id: str) -> Optional[TgSyncState]:
-        """Get sync state for a chat."""
-        async with self.get_connection() as conn:
-            row = await conn.fetchrow(
-                "SELECT chat_id, last_message_id, last_edit_ts FROM tg_sync_state WHERE chat_id = $1",
-                chat_id,
-            )
-            if row:
-                return TgSyncState(**dict(row))
-            return None
-
-    async def update_sync_state(self, state: TgSyncState):
-        """Update sync state for a chat."""
-        async with self.get_connection() as conn:
-            await conn.execute(
-                """
-                INSERT INTO tg_sync_state (chat_id, last_message_id, last_edit_ts, updated_at)
-                VALUES ($1, $2, $3, now())
-                ON CONFLICT (chat_id) DO UPDATE SET
-                    last_message_id = EXCLUDED.last_message_id,
-                    last_edit_ts = EXCLUDED.last_edit_ts,
-                    updated_at = now()
-                """,
-                state.chat_id,
-                state.last_message_id,
-                state.last_edit_ts,
-            )
 
     async def get_cached_embedding(self, text_hash: str) -> Optional[EmbeddingCache]:
         """Get cached embedding by text hash."""

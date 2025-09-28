@@ -89,6 +89,10 @@ def mock_indexer_deps():
                 "thread_id": None,
             }
         )
+        mock_tg.client = MagicMock()
+        mock_tg.client.add_event_handler = MagicMock()
+        mock_tg.client.remove_event_handler = MagicMock()
+        mock_tg.is_connected = MagicMock(return_value=True)
         mock_tg_class.return_value = mock_tg
 
         # Mock chunker

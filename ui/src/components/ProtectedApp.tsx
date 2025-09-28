@@ -11,6 +11,14 @@ import {
   DEFAULT_SEARCH_LIMIT,
 } from "../lib/api";
 import { formatTelegramLink } from "../lib/telegram_links";
+import {
+  formatDate,
+  formatTime,
+  getChatTypeLabel,
+  formatCitationLink,
+  formatCitationAuthor,
+  getReferencedCitationIndices,
+} from "../lib/chatFormatters";
 
 const CONTEXT_LIMIT_STORAGE_KEY = "searchContextLimit";
 const MIN_CONTEXT_LIMIT = 1;
@@ -55,33 +63,6 @@ interface Message {
   timing_seconds?: number;
   reformulated_query?: string;
 }
-
-const formatDate = (timestamp?: number) => {
-  if (!timestamp) return "Unknown date";
-  const ms = timestamp > 1e12 ? timestamp : timestamp * 1000;
-  return new Date(ms).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const getChatTypeLabel = (chatType?: string) => {
-  switch (chatType) {
-    case "private":
-      return "Private";
-    case "group":
-      return "Group";
-    case "supergroup":
-      return "Supergroup";
-    case "channel":
-      return "Channel";
-    default:
-      return "Chat";
-  }
-};
 
 export default function ProtectedApp() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -507,33 +488,23 @@ export default function ProtectedApp() {
     });
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
-
-  const formatCitationLink = (citation: ChatCitation) => {
-    return formatTelegramLink({
-      chatId: citation.chat_id,
-      messageId: citation.message_id,
-      sourceTitle: citation.source_title,
-      chatType: citation.chat_type,
-      chatUsername: citation.chat_username,
-      threadId: citation.thread_id,
-    });
-  };
-
   const renderMessageContent = (message: Message) => {
-    // Basic markdown-style rendering for citations
-    let content = message.content;
+    const citations = message.citations ?? [];
+    const referencedIndices = getReferencedCitationIndices(
+      message.content,
+      citations.length,
+    );
+    const referencedSet = new Set(referencedIndices);
 
-    // If there are citations, make [n] clickable
-    if (message.citations && message.citations.length > 0 && content) {
-      message.citations.forEach((citation, index) => {
-        const citationNum = index + 1;
+    let content = message.content ?? "";
+
+    if (citations.length > 0 && referencedSet.size > 0 && content) {
+      referencedIndices.forEach((citationIndex) => {
+        const citationNum = citationIndex + 1;
         const regex = new RegExp(`\\[${citationNum}\\]`, "g");
         content = content.replace(
           regex,
-          `<span class="text-blue-600 cursor-pointer font-medium underline hover:bg-blue-50 px-1 py-0.5 rounded transition-colors citation-link" data-citation="${index}">[${citationNum}]</span>`,
+          `<span class="text-blue-600 cursor-pointer font-medium underline hover:bg-blue-50 px-1 py-0.5 rounded transition-colors citation-link" data-citation="${citationIndex}">[${citationNum}]</span>`,
         );
       });
     }
@@ -542,51 +513,59 @@ export default function ProtectedApp() {
       <div>
         <div
           className="text-sm leading-relaxed whitespace-pre-wrap"
-          dangerouslySetInnerHTML={{ __html: content || "" }}
+          dangerouslySetInnerHTML={{ __html: content }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
-            if (target.classList.contains("citation-link")) {
-              const citationIndex = parseInt(target.dataset.citation || "0");
-              if (message.citations && message.citations[citationIndex]) {
-                const citation = message.citations[citationIndex];
-                window.open(formatCitationLink(citation), "_blank");
-              }
+            if (!target.classList.contains("citation-link")) return;
+
+            const citationIndex = Number.parseInt(
+              target.dataset.citation || "",
+              10,
+            );
+
+            if (
+              Number.isNaN(citationIndex) ||
+              !referencedSet.has(citationIndex)
+            ) {
+              return;
+            }
+
+            const citation = citations[citationIndex];
+            if (citation) {
+              window.open(formatCitationLink(citation), "_blank");
             }
           }}
         />
 
-        {/* Always render styled citations list if citations are available */}
-        {message.citations && message.citations.length > 0 && (
+        {citations.length > 0 && referencedIndices.length > 0 && (
           <div className="mt-3 pt-3 border-t border-gray-200">
             <div className="text-xs text-gray-600 mb-2 font-medium">
               Sources:
             </div>
             <div className="space-y-1">
-              {message.citations.map((citation, index) => (
-                <div key={citation.id} className="text-xs text-gray-600">
-                  <button
-                    onClick={() =>
-                      window.open(formatCitationLink(citation), "_blank")
-                    }
-                    className="hover:text-blue-600 hover:underline text-left"
+              {referencedIndices.map((citationIndex) => {
+                const citation = citations[citationIndex];
+                if (!citation) return null;
+                const citationNumber = citationIndex + 1;
+                return (
+                  <div
+                    key={`${citation.id}-${citationNumber}`}
+                    className="text-xs text-gray-600"
                   >
-                    [{index + 1}]{" "}
-                    {citation.source_title || `Chat ${citation.chat_id}`} —{" "}
-                    {citation.message_date
-                      ? new Date(
-                          citation.message_date * 1000,
-                        ).toLocaleDateString("en-US", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "Unknown date"}{" "}
-                    — message {citation.message_id}
-                  </button>
-                </div>
-              ))}
+                    <button
+                      onClick={() =>
+                        window.open(formatCitationLink(citation), "_blank")
+                      }
+                      className="hover:text-blue-600 hover:underline text-left"
+                    >
+                      [{citationNumber}] {" "}
+                      {citation.source_title || `Chat ${citation.chat_id}`} — {" "}
+                      {formatDate(citation.message_date)} — {" "}
+                      {formatCitationAuthor(citation)}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

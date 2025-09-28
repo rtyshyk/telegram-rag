@@ -1,43 +1,11 @@
 """Tests for data models."""
 
-import pytest
-from datetime import datetime
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import TgSyncState, EmbeddingCache, Chunk, VespaDocument, IndexerMetrics
-
-
-class TestTgSyncState:
-    """Test TgSyncState model."""
-
-    def test_create_empty_state(self):
-        """Test creating empty sync state."""
-        state = TgSyncState(chat_id="123")
-        assert state.chat_id == "123"
-        assert state.last_message_id is None
-        assert state.last_edit_ts is None
-
-    def test_create_full_state(self):
-        """Test creating full sync state."""
-        state = TgSyncState(chat_id="123", last_message_id=456, last_edit_ts=1692825600)
-        assert state.chat_id == "123"
-        assert state.last_message_id == 456
-        assert state.last_edit_ts == 1692825600
-
-    def test_state_serialization(self):
-        """Test state can be serialized/deserialized."""
-        state = TgSyncState(chat_id="123", last_message_id=456, last_edit_ts=1692825600)
-
-        # Test dict conversion
-        state_dict = state.model_dump()
-        restored = TgSyncState(**state_dict)
-
-        assert restored.chat_id == state.chat_id
-        assert restored.last_message_id == state.last_message_id
-        assert restored.last_edit_ts == state.last_edit_ts
+from models import EmbeddingCache, Chunk, VespaDocument, IndexerMetrics
 
 
 class TestEmbeddingCache:

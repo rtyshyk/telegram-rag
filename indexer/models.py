@@ -4,14 +4,6 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-class TgSyncState(BaseModel):
-    """Sync state per chat."""
-
-    chat_id: str
-    last_message_id: Optional[int] = None
-    last_edit_ts: Optional[int] = None
-
-
 class EmbeddingCache(BaseModel):
     """Cached embedding for text."""
 

@@ -3,14 +3,12 @@
 import pytest
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-import asyncio
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db import DatabaseManager
-from models import TgSyncState, EmbeddingCache, Chunk
+from models import EmbeddingCache, Chunk
 
 
 class FakeConnection:
@@ -62,34 +60,6 @@ async def test_create_tables_executes_ddl():
     with patch.object(dbm, "get_connection", return_value=DummyCtx(fake_conn)):
         await dbm.create_tables()
     assert any("CREATE TABLE" in call[0] for call in fake_conn.executed)
-
-
-@pytest.mark.asyncio
-async def test_sync_state_roundtrip():
-    dbm = DatabaseManager("postgresql://user:pass@host/db")
-    fake_conn = FakeConnection()
-    state = TgSyncState(chat_id="chat1", last_message_id=123, last_edit_ts=456)
-
-    # First call (fetchrow) returns None, second returns dict
-    sequence = [
-        None,
-        {
-            "chat_id": state.chat_id,
-            "last_message_id": state.last_message_id,
-            "last_edit_ts": state.last_edit_ts,
-        },
-    ]
-
-    class SeqCtx(DummyCtx):
-        async def __aenter__(self_inner):
-            fake_conn._fetchrow_value = sequence.pop(0)
-            return fake_conn
-
-    with patch.object(dbm, "get_connection", side_effect=lambda: SeqCtx(fake_conn)):
-        # update then get
-        await dbm.update_sync_state(state)
-        loaded = await dbm.get_sync_state(state.chat_id)
-    assert loaded == state
 
 
 @pytest.mark.asyncio

@@ -135,6 +135,8 @@ export interface ChatCitation {
   chat_username?: string;
   thread_id?: number;
   chat_type?: string;
+  sender?: string;
+  sender_username?: string;
 }
 
 export interface ChatUsage {
