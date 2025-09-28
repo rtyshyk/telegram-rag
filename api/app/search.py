@@ -302,7 +302,9 @@ class VespaSearchClient:
             for key, val in value.items():
                 if (
                     isinstance(key, str)
-                    and any(marker in key.lower() for marker in self._LOG_VECTOR_MARKERS)
+                    and any(
+                        marker in key.lower() for marker in self._LOG_VECTOR_MARKERS
+                    )
                     and isinstance(val, (list, tuple, set, dict))
                 ):
                     serialised[key] = "[redacted vector]"
@@ -419,7 +421,9 @@ class VespaSearchClient:
                 + expansion_level * settings.search_expansion_rerank_step,
             )
             limited_candidates = candidates[:rerank_cap]
-            rerank_results = await reranker.rerank(query, limited_candidates, final_limit)
+            rerank_results = await reranker.rerank(
+                query, limited_candidates, final_limit
+            )
         else:
             rerank_results = candidates
 

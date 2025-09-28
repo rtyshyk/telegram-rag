@@ -4,7 +4,7 @@
 const API_BASE_RAW = import.meta.env.PUBLIC_API_URL;
 const API_BASE: string = API_BASE_RAW ? API_BASE_RAW.replace(/\/$/, "") : "";
 
-export const DEFAULT_SEARCH_LIMIT = 3;
+export const DEFAULT_SEARCH_LIMIT = 5;
 
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {

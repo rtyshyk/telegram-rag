@@ -15,7 +15,13 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-from app.search import SearchRequest, SearchResult, SearchSpan, SeedHit, VespaSearchClient
+from app.search import (
+    SearchRequest,
+    SearchResult,
+    SearchSpan,
+    SeedHit,
+    VespaSearchClient,
+)
 from app.settings import settings
 
 
@@ -147,7 +153,9 @@ def test_seed_dedupe_keeps_highest_scoring_within_gap(
     assert filtered_ids == ["chat:high-score", "chat:far-mid"]
 
 
-def test_search_request_expansion_level_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_search_request_expansion_level_clamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "search_expansion_max_level", 2)
     req_high = SearchRequest(q="x", expansion_level=5)
     assert req_high.expansion_level == 2
@@ -172,9 +180,9 @@ async def test_broaden_raises_result_cap(
 ) -> None:
     monkeypatch.setattr(settings, "search_seed_limit", 80)
 
-    total_seeds = settings.search_default_limit + (
-        2 * settings.search_expansion_result_step
-    ) + 5
+    total_seeds = (
+        settings.search_default_limit + (2 * settings.search_expansion_result_step) + 5
+    )
     seeds = [
         make_seed(
             f"chat-{idx}",
