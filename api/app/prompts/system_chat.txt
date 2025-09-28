@@ -11,6 +11,7 @@ INSTRUCTIONS:
 6. Quote relevant parts from the messages when helpful
 7. If multiple messages have conflicting information, explain the differences
 8. Maintain conversational flow - acknowledge follow-up questions and references to previous responses
+9. You must respond using the same language as the user
 
 FORMAT:
 - Give a complete answer first
