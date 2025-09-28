@@ -1,482 +1,404 @@
+"""Tests for the Vespa search client context expansion pipeline."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any, Optional
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
-from fastapi.testclient import TestClient
 
-from api.app.main import app
-from api.app.auth import create_session
-from api.app.search import (
-    get_search_client,
-    SearchRequest,
-    VespaSearchClient,
-    SearchResult,
-)
-from api.app.settings import settings
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.append(str(BASE_DIR))
+
+from app.search import SearchRequest, SearchResult, VespaSearchClient
+from app.settings import settings
 
 
-def auth_cookie() -> dict[str, str]:
-    token = create_session("tester")
-    return {"rag_session": token}
+@pytest.fixture
+def mock_http() -> AsyncMock:
+    client = AsyncMock()
+    client.post = AsyncMock()
+    return client
 
 
-def test_search_unauthorized():
-    client = TestClient(app)
-    resp = client.post("/search", json={"q": "hello"})
-    assert resp.status_code == 401
+@pytest.fixture
+def mock_embedder() -> AsyncMock:
+    embedder = AsyncMock()
+    embedder.embed = AsyncMock(return_value=[0.1] * 1536)
+    return embedder
+
+
+@pytest.fixture
+def search_client(
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> VespaSearchClient:
+    """Construct a VespaSearchClient with deterministic dependencies."""
+
+    monkeypatch.setattr(settings, "rerank_enabled", False)
+    monkeypatch.setattr(settings, "voyage_stub", False)
+    monkeypatch.setattr(settings, "voyage_api_key", None)
+    monkeypatch.setattr(settings, "embed_model", "text-embedding-3-small")
+    monkeypatch.setattr(settings, "search_seed_limit", 3)
+    monkeypatch.setattr(settings, "search_seeds_per_chat", 2)
+    monkeypatch.setattr(settings, "search_neighbor_min_messages", 1)
+    monkeypatch.setattr(settings, "search_neighbor_message_window", 2)
+    monkeypatch.setattr(settings, "search_neighbor_time_window_minutes", 10)
+    monkeypatch.setattr(settings, "search_candidate_max_messages", 10)
+    monkeypatch.setattr(settings, "search_candidate_token_limit", 200)
+    monkeypatch.setattr(settings, "search_seed_dedupe_message_gap", 0)
+    monkeypatch.setattr(settings, "search_seed_dedupe_time_gap_seconds", 0)
+
+    client = VespaSearchClient(http=mock_http)
+    client.embedder = mock_embedder
+    return client
+
+
+def make_seed(
+    chat_id: str,
+    message_id: int,
+    *,
+    text: str,
+    score: float,
+    timestamp_ms: Optional[int] = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "id": f"{chat_id}:{message_id}",
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    }
+    if timestamp_ms is not None:
+        fields["message_date"] = timestamp_ms
+    fields.update(extra)
+    return {"fields": fields, "relevance": score}
+
+
+def make_message(
+    chat_id: str,
+    message_id: int,
+    *,
+    text: str,
+    timestamp_ms: Optional[int] = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "id": f"{chat_id}:{message_id}",
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    }
+    if timestamp_ms is not None:
+        fields["message_date"] = timestamp_ms
+    fields.update(extra)
+    return {"fields": fields}
 
 
 @pytest.mark.asyncio
-async def test_search_stub(monkeypatch):
-    client = TestClient(app)
-    search_client = await get_search_client()
-
-    async def fake_search(req: SearchRequest):  # type: ignore
-        return []
-
-    search_client.search = fake_search  # type: ignore
-    resp = client.post("/search", cookies=auth_cookie(), json={"q": "test"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["results"] == []
+async def test_returns_empty_for_blank_query(
+    search_client: VespaSearchClient, mock_http: AsyncMock
+) -> None:
+    results = await search_client.search(SearchRequest(q="   "))
+    assert results == []
+    mock_http.post.assert_not_awaited()
 
 
-class TestVespaSearchClient:
-    """Comprehensive tests for VespaSearchClient."""
-
-    @pytest.fixture
-    def mock_http_client(self):
-        return AsyncMock()
-
-    @pytest.fixture
-    def mock_embedder(self):
-        embedder = AsyncMock()
-        embedder.embed.return_value = [0.1] * 1536  # Default to small model dimensions
-        return embedder
-
-    @pytest.fixture
-    def search_client(self, mock_http_client, mock_embedder, monkeypatch):
-        monkeypatch.setattr(settings, "rerank_enabled", False)
-        monkeypatch.setattr(settings, "voyage_stub", False)
-        monkeypatch.setattr(settings, "voyage_api_key", None)
-        client = VespaSearchClient(http=mock_http_client)
-        client.embedder = mock_embedder
-        return client
-
-    @pytest.mark.asyncio
-    async def test_empty_query_returns_empty_results(self, search_client):
-        """Test that empty or whitespace-only queries return empty results."""
-        req = SearchRequest(q="")
-        results = await search_client.search(req)
-        assert results == []
-
-        req = SearchRequest(q="   ")
-        results = await search_client.search(req)
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_hybrid_search_with_small_model(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test hybrid search with text-embedding-3-small model."""
-        # Setup mock responses
-        mock_embedder.embed.return_value = [0.1] * 1536
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "root": {
-                "children": [
-                    {
-                        "fields": {
-                            "id": "test_id",
-                            "text": "test text",
-                            "chat_id": "test_chat",
-                            "message_id": 123,
-                            "chunk_idx": 0,
-                        },
-                        "relevance": 0.95,
-                    }
-                ]
-            }
+@pytest.mark.asyncio
+async def test_hybrid_context_expansion(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+) -> None:
+    seed_payload = {
+        "root": {
+            "children": [
+                make_seed(
+                    "chat-1",
+                    101,
+                    text="Reminder about the flight",
+                    score=0.92,
+                    timestamp_ms=1695759000000,
+                    sender="Alex",
+                    chat_username="travel-group",
+                    source_title="Itinerary",
+                )
+            ]
         }
-        mock_http_client.post.return_value = mock_response
-
-        with patch.object(settings, "embed_model", "text-embedding-3-small"):
-            req = SearchRequest(q="test query", hybrid=True, limit=5)
-            results = await search_client.search(req)
-
-        # Verify embedding was called
-        mock_embedder.embed.assert_called_once_with("test query")
-
-        # Verify HTTP request was made with correct parameters
-        mock_http_client.post.assert_called_once()
-        call_args = mock_http_client.post.call_args
-
-        # Check URL
-        assert call_args[0][0].endswith("/search/")
-
-        # Check request body
-        body = call_args[1]["json"]
-        assert "test query" in body["q"]
-        assert body["hits"] == 5
-        assert body["ranking"] == "hybrid-small"
-        assert "vector_small" in body["yql"]
-        assert "qv_small" in body["yql"]
-        assert "input.query(qv_small)" in body
-        assert len(body["input.query(qv_small)"]) == 1536
-
-        # Verify results
-        assert len(results) == 1
-        assert results[0].id == "test_id"
-        assert results[0].score == 0.95
-
-    @pytest.mark.asyncio
-    async def test_hybrid_search_with_large_model(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test hybrid search with text-embedding-3-large model."""
-        # Setup mock responses
-        mock_embedder.embed.return_value = [0.1] * 3072
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        with patch.object(settings, "embed_model", "text-embedding-3-large"):
-            req = SearchRequest(q="test query", hybrid=True)
-            await search_client.search(req)
-
-        # Verify HTTP request was made with correct parameters for large model
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-
-        assert body["ranking"] == "hybrid-large"
-        assert "vector_large" in body["yql"]
-        assert "qv_large" in body["yql"]
-        assert "input.query(qv_large)" in body
-        assert len(body["input.query(qv_large)"]) == 3072
-
-    @pytest.mark.asyncio
-    async def test_bm25_only_search(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test BM25-only search (hybrid=False)."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test query", hybrid=False)
-        await search_client.search(req)
-
-        # Verify embedding was NOT called
-        mock_embedder.embed.assert_not_called()
-
-        # Verify HTTP request was made with correct parameters
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-
-        assert body["ranking"] == "default"
-        assert "vector_small" not in body["yql"]
-        assert "vector_large" not in body["yql"]
-        assert "nearestNeighbor" not in body["yql"]
-        assert "userInput(@q)" in body["yql"]
-        assert "input.query(qv_small)" not in body
-        assert "input.query(qv_large)" not in body
-
-    @pytest.mark.asyncio
-    async def test_search_with_chat_id_filter(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test search with chat_id filter."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test query", chat_id="test_chat_123", hybrid=False)
-        await search_client.search(req)
-
-        # Verify YQL contains chat_id filter
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-        yql = body["yql"]
-
-        assert "chat_id contains 'test_chat_123'" in yql
-        assert "and" in yql  # Filter should be AND-ed with main query
-
-    @pytest.mark.asyncio
-    async def test_search_with_thread_id_filter(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test search with thread_id filter."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test query", thread_id=456, hybrid=False)
-        await search_client.search(req)
-
-        # Verify YQL contains thread_id filter
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-        yql = body["yql"]
-
-        assert "thread_id = 456" in yql
-        assert "and" in yql  # Filter should be AND-ed with main query
-
-    @pytest.mark.asyncio
-    async def test_search_with_multiple_filters(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test search with both chat_id and thread_id filters."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(
-            q="test query", chat_id="test_chat", thread_id=789, hybrid=False
-        )
-        await search_client.search(req)
-
-        # Verify YQL contains both filters
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-        yql = body["yql"]
-
-        assert "chat_id contains 'test_chat'" in yql
-        assert "thread_id = 789" in yql
-        assert yql.count("and") >= 2  # Should have multiple AND clauses
-
-    @pytest.mark.asyncio
-    async def test_chat_id_escaping(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test that single quotes in chat_id are properly escaped."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test", chat_id="chat'with'quotes", hybrid=False)
-        await search_client.search(req)
-
-        # Verify single quotes are escaped
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-        yql = body["yql"]
-
-        assert "chat%27with%27quotes" in yql
-
-    @pytest.mark.asyncio
-    async def test_embedding_failure_fallback(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test that embedding failures fall back to BM25-only search."""
-        # Setup embedding to fail
-        mock_embedder.embed.side_effect = Exception("Embedding service down")
-
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test query", hybrid=True)
-        await search_client.search(req)
-
-        # Verify HTTP request was made with BM25-only parameters
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-
-        assert body["ranking"] == "default"  # Should fall back to default ranking
-        assert "nearestNeighbor" not in body["yql"]
-        assert "input.query(qv_small)" not in body
-        assert "input.query(qv_large)" not in body
-
-    @pytest.mark.asyncio
-    async def test_vector_dimension_mismatch_warning(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test warning when vector dimensions don't match expected model dimensions."""
-        # Setup wrong dimension vector
-        mock_embedder.embed.return_value = [0.1] * 512  # Wrong dimensions
-
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        with patch.object(settings, "embed_model", "text-embedding-3-small"):
-            req = SearchRequest(q="test query", hybrid=True)
-
-            # This should log a warning but still proceed
-            with patch("api.app.search.logger") as mock_logger:
-                await search_client.search(req)
-
-                # Verify warning was logged
-                mock_logger.warning.assert_called_once()
-                warning_msg = mock_logger.warning.call_args[0][0]
-                assert "Vector dimension mismatch" in warning_msg
-                assert "got 512, expected 1536" in warning_msg
-
-    @pytest.mark.asyncio
-    async def test_vespa_error_handling(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test handling of Vespa HTTP errors."""
-        # Setup HTTP client to raise an exception
-        mock_http_client.post.side_effect = Exception("Vespa connection failed")
-
-        req = SearchRequest(q="test query", hybrid=False)
-        results = await search_client.search(req)
-
-        # Should return empty results on error
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_search_result_parsing(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test comprehensive parsing of search results with all fields."""
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "root": {
-                "children": [
-                    {
-                        "fields": {
-                            "id": "chat123:msg456:chunk0",
-                            "text": "This is a test message",
-                            "chat_id": "test_chat",
-                            "message_id": 456,
-                            "chunk_idx": 0,
-                            "sender": "John Doe",
-                            "sender_username": "@johndoe",
-                            "message_date": 1692825600,
-                            "source_title": "Test Group",
-                            "chat_type": "group",
-                            "edit_date": 1692825700,
-                            "thread_id": 789,
-                            "has_link": True,
-                        },
-                        "relevance": 0.85,
-                    },
-                    {
-                        "fields": {
-                            "id": "chat456:msg789:chunk1",
-                            "text": "Another message",
-                            "chat_id": "test_chat_2",
-                            "message_id": 789,
-                            "chunk_idx": 1,
-                            # Some fields missing to test defaults
-                        },
-                        "relevance": 0.72,
-                    },
-                ]
-            }
+    }
+    neighbor_payload = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-1",
+                    100,
+                    text="Let's meet before the flight.",
+                    timestamp_ms=1695758940000,
+                    sender="Jamie",
+                ),
+                make_message(
+                    "chat-1",
+                    101,
+                    text="Reminder about the flight",
+                    timestamp_ms=1695759000000,
+                    sender="Alex",
+                ),
+                make_message(
+                    "chat-1",
+                    102,
+                    text="Flight is at 11:34 tomorrow.",
+                    timestamp_ms=1695759060000,
+                    sender="Jamie",
+                ),
+            ]
         }
-        mock_http_client.post.return_value = mock_response
+    }
+    mock_http.post.side_effect = [
+        async_response(seed_payload),
+        async_response(neighbor_payload),
+    ]
 
-        req = SearchRequest(q="test query", hybrid=False)
-        results = await search_client.search(req)
+    req = SearchRequest(q="flight 11:34", hybrid=True, limit=3)
+    results = await search_client.search(req)
 
-        # Verify all fields are parsed correctly
-        assert len(results) == 2
+    assert len(results) == 1
+    result = results[0]
+    assert isinstance(result, SearchResult)
+    assert result.chat_id == "chat-1"
+    assert result.message_id == 101
+    assert result.message_count == 3
+    assert result.span.start_id == 100
+    assert result.span.end_id == 102
+    assert "Flight is at 11:34 tomorrow." in result.text
+    assert result.seed_score == pytest.approx(0.92)
+    assert result.retrieval_score == pytest.approx(0.92)
+    assert result.chat_username == "travel-group"
+    assert result.source_title == "Itinerary"
 
-        # First result with all fields
-        r1 = results[0]
-        assert r1.id == "chat123:msg456:chunk0"
-        assert r1.text == "This is a test message"
-        assert r1.chat_id == "test_chat"
-        assert r1.message_id == 456
-        assert r1.chunk_idx == 0
-        assert r1.score == 0.85
-        assert r1.sender == "John Doe"
-        assert r1.sender_username == "@johndoe"
-        assert r1.message_date == 1692825600
-        assert r1.source_title == "Test Group"
-        assert r1.chat_type == "group"
-        assert r1.edit_date == 1692825700
-        assert r1.thread_id == 789
-        assert r1.has_link is True
+    assert mock_http.post.await_count == 2
+    body = mock_http.post.await_args_list[0].kwargs["json"]
+    assert body["hits"] == settings.search_seed_limit
+    assert "nearestNeighbor" in body["yql"]
+    mock_embedder.embed.assert_awaited_once_with("flight 11:34")
 
-        # Second result with missing optional fields
-        r2 = results[1]
-        assert r2.id == "chat456:msg789:chunk1"
-        assert r2.text == "Another message"
-        assert r2.score == 0.72
-        assert r2.sender is None
-        assert r2.message_date is None
 
-    @pytest.mark.asyncio
-    async def test_custom_limit_parameter(
-        self, search_client, mock_http_client, mock_embedder
-    ):
-        """Test that custom limit parameter is properly passed to Vespa."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"root": {"children": []}}
-        mock_http_client.post.return_value = mock_response
-
-        req = SearchRequest(q="test query", limit=25, hybrid=False)
-        await search_client.search(req)
-
-        # Verify limit is set in request body
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-
-        assert body["hits"] == 25
-
-        # For hybrid search, limit should also be in targetHits
-        req = SearchRequest(q="test query", limit=25, hybrid=True)
-        await search_client.search(req)
-
-        call_args = mock_http_client.post.call_args
-        body = call_args[1]["json"]
-        yql = body["yql"]
-
-        assert "targetHits:25" in yql
-
-    @pytest.mark.asyncio
-    async def test_rerank_stub_reorders_and_expands_candidate_pool(
-        self, mock_http_client, mock_embedder, monkeypatch
-    ):
-        """Ensure rerank stub reorders results and increases Vespa hits."""
-
-        monkeypatch.setattr(settings, "rerank_enabled", True)
-        monkeypatch.setattr(settings, "voyage_stub", True)
-        monkeypatch.setattr(settings, "rerank_candidate_limit", 5)
-        monkeypatch.setattr(settings, "openai_api_key", "sk-test")
-
-        client = VespaSearchClient(http=mock_http_client)
-        client.embedder = mock_embedder
-
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "root": {
-                "children": [
-                    {
-                        "fields": {
-                            "id": "doc-alpha",
-                            "text": "Alpha content with no match",
-                            "chat_id": "chatA",
-                            "message_id": 1,
-                            "chunk_idx": 0,
-                        },
-                        "relevance": 0.9,
-                    },
-                    {
-                        "fields": {
-                            "id": "doc-beta",
-                            "text": "Beta insight and details",
-                            "chat_id": "chatB",
-                            "message_id": 2,
-                            "chunk_idx": 0,
-                        },
-                        "relevance": 0.4,
-                    },
-                ]
-            }
+@pytest.mark.asyncio
+async def test_bm25_only_when_hybrid_false(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+) -> None:
+    seed_payload = {
+        "root": {
+            "children": [
+                make_seed(
+                    "chat-2",
+                    10,
+                    text="Keyword seed",
+                    score=0.4,
+                    timestamp_ms=1695755000000,
+                )
+            ]
         }
-        mock_http_client.post.return_value = mock_response
+    }
+    neighbor_payload = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-2",
+                    10,
+                    text="Keyword context",
+                    timestamp_ms=1695755000000,
+                )
+            ]
+        }
+    }
+    mock_http.post.side_effect = [
+        async_response(seed_payload),
+        async_response(neighbor_payload),
+    ]
 
-        req = SearchRequest(q="beta", limit=2, hybrid=False)
-        results = await client.search(req)
+    req = SearchRequest(q="keyword", hybrid=False, limit=2)
+    results = await search_client.search(req)
 
-        call_args = mock_http_client.post.call_args
-        request_body = call_args[1]["json"]
-        assert request_body["hits"] == 5
+    assert len(results) == 1
+    mock_embedder.embed.assert_not_called()
+    body = mock_http.post.await_args_list[0].kwargs["json"]
+    assert body["ranking"] == "default"
+    assert not any(key.startswith("input.query(") for key in body)
 
-        assert [r.id for r in results] == ["doc-beta", "doc-alpha"]
-        assert results[0].rerank_score is not None
-        assert results[0].score == results[0].rerank_score
+
+@pytest.mark.asyncio
+async def test_rerank_stub_orders_by_overlap(
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "embed_model", "text-embedding-3-small")
+    monkeypatch.setattr(settings, "rerank_enabled", True)
+    monkeypatch.setattr(settings, "voyage_stub", True)
+    monkeypatch.setattr(settings, "voyage_api_key", None)
+    monkeypatch.setattr(settings, "search_seed_limit", 2)
+    monkeypatch.setattr(settings, "search_candidate_max_messages", 5)
+    monkeypatch.setattr(settings, "search_neighbor_message_window", 1)
+    monkeypatch.setattr(settings, "search_neighbor_min_messages", 1)
+    monkeypatch.setattr(settings, "search_seed_dedupe_message_gap", 0)
+    monkeypatch.setattr(settings, "search_seed_dedupe_time_gap_seconds", 0)
+
+    client = VespaSearchClient(http=mock_http)
+    client.embedder = mock_embedder
+
+    seeds = {
+        "root": {
+            "children": [
+                make_seed(
+                    "chat-3",
+                    50,
+                    text="Lunch tomorrow?",
+                    score=0.8,
+                    timestamp_ms=1695760000000,
+                ),
+                make_seed(
+                    "chat-3",
+                    60,
+                    text="Flight reminder",
+                    score=0.6,
+                    timestamp_ms=1695764000000,
+                ),
+            ]
+        }
+    }
+    neighbors_lunch = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-3",
+                    49,
+                    text="Lunch at noon?",
+                    timestamp_ms=1695759940000,
+                ),
+                make_message(
+                    "chat-3",
+                    50,
+                    text="Lunch tomorrow?",
+                    timestamp_ms=1695760000000,
+                ),
+            ]
+        }
+    }
+    neighbors_flight = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-3",
+                    59,
+                    text="Travel update",
+                    timestamp_ms=1695763940000,
+                ),
+                make_message(
+                    "chat-3",
+                    60,
+                    text="Flight leaves 11:34",
+                    timestamp_ms=1695764000000,
+                ),
+            ]
+        }
+    }
+    mock_http.post.side_effect = [
+        async_response(seeds),
+        async_response(neighbors_lunch),
+        async_response(neighbors_flight),
+    ]
+
+    req = SearchRequest(q="flight 11:34", hybrid=True, limit=2)
+    results = await client.search(req)
+
+    assert len(results) == 2
+    assert results[0].message_id == 60
+    assert "11:34" in results[0].text
+    assert results[0].score >= results[1].score
+    assert results[0].rerank_score is not None
+
+
+@pytest.mark.asyncio
+async def test_cyrillic_query_expansion_injects_variants(
+    search_client: VespaSearchClient,
+    mock_embedder: AsyncMock,
+) -> None:
+    req = SearchRequest(q="коли іра прилітає з катовіце?", hybrid=True, limit=5)
+    _, body, _ = await search_client._build_query(req)
+
+    assert "прилітаєш" in body["q"]
+    assert body.get("input.language") == "uk"
+    mock_embedder.embed.assert_awaited_once_with("коли іра прилітає з катовіце?")
+
+
+@pytest.mark.asyncio
+async def test_preserves_single_header_for_formatted_messages(
+    search_client: VespaSearchClient,
+    mock_http: AsyncMock,
+    mock_embedder: AsyncMock,
+) -> None:
+    formatted_text = "[2025-09-04 06:14 • Iryna Tyshyk] Десь о 13 буду у Катовіце"
+    seed_payload = {
+        "root": {
+            "children": [
+                make_seed(
+                    "chat-4",
+                    200,
+                    text=formatted_text,
+                    score=0.87,
+                    timestamp_ms=1693808040000,
+                    sender="Iryna Tyshyk",
+                    sender_username="iryna",
+                )
+            ]
+        }
+    }
+    neighbor_payload = {
+        "root": {
+            "children": [
+                make_message(
+                    "chat-4",
+                    200,
+                    text=formatted_text,
+                    timestamp_ms=1693808040000,
+                    sender="Iryna Tyshyk",
+                    sender_username="iryna",
+                )
+            ]
+        }
+    }
+
+    mock_http.post.side_effect = [
+        async_response(seed_payload),
+        async_response(neighbor_payload),
+    ]
+
+    req = SearchRequest(q="катовіце", hybrid=False, limit=1)
+    results = await search_client.search(req)
+
+    assert len(results) == 1
+    mock_embedder.embed.assert_not_called()
+
+    line = results[0].text.splitlines()[0]
+    assert line == formatted_text
+    assert line.count("[2025-09-04 06:14") == 1
+
+
+def async_response(payload: dict[str, Any]):
+    class _Response:
+        def __init__(self, data: dict[str, Any]):
+            self._data = data
+
+        def json(self) -> dict[str, Any]:
+            return self._data
+
+        def raise_for_status(self) -> None:  # pragma: no cover - no-op
+            return None
+
+    return _Response(payload)

@@ -185,17 +185,26 @@ class ContextAssembler:
         return context, selected_indices
 
     def _format_chunk_header(self, result: SearchResult, citation_num: int) -> str:
-        """Format a header for a context chunk."""
+        """Format a header for a stitched context chunk."""
         chat_title = result.source_title or f"Chat {result.chat_id}"
         date_str = "Unknown date"
 
         if result.message_date:
-            dt = datetime.fromtimestamp(result.message_date)
+            ts = result.message_date
+            if ts > 10_000_000_000:
+                ts = ts / 1000
+            dt = datetime.fromtimestamp(ts)
             date_str = dt.strftime("%Y-%m-%d %H:%M")
 
-        return (
-            f"[{citation_num}] {chat_title} — {date_str} — message {result.message_id}:"
-        )
+        if result.span.start_id == result.span.end_id:
+            span_label = f"message {result.span.start_id}"
+        else:
+            span_label = f"messages {result.span.start_id}–{result.span.end_id}"
+
+        if result.message_count > 1:
+            span_label += f" ({result.message_count} messages)"
+
+        return f"[{citation_num}] {chat_title} — {date_str} — {span_label}:"
 
 
 class ChatCostEstimator:

@@ -1,8 +1,10 @@
 // Use only explicitly provided PUBLIC_API_URL; fail fast if undefined in runtime usage paths.
+/// <reference path="../env.d.ts" />
+
 const API_BASE_RAW = import.meta.env.PUBLIC_API_URL;
 const API_BASE: string = API_BASE_RAW ? API_BASE_RAW.replace(/\/$/, "") : "";
 
-export const DEFAULT_SEARCH_LIMIT = 20;
+export const DEFAULT_SEARCH_LIMIT = 3;
 
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {
@@ -50,6 +52,13 @@ export async function fetchChats(): Promise<ChatInfo[]> {
   return data.ok ? data.chats : [];
 }
 
+export interface SearchSpan {
+  start_id: number;
+  end_id: number;
+  start_ts?: number;
+  end_ts?: number;
+}
+
 export interface SearchResult {
   id: string;
   text: string;
@@ -57,6 +66,9 @@ export interface SearchResult {
   message_id: number;
   chunk_idx: number;
   score: number;
+  seed_score: number;
+  span: SearchSpan;
+  message_count: number;
   sender?: string;
   sender_username?: string;
   chat_username?: string;
