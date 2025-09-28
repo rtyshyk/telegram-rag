@@ -69,10 +69,15 @@ export default function ProtectedApp() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [selectedChat, setSelectedChat] = useState<string>("");
   const [chatError, setChatError] = useState<string | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   // Monotonic sequence to avoid race conditions between overlapping searches
   const searchSeqRef = useRef(0);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const scrollToBottom = () => {
     const el = messagesEndRef.current;
@@ -498,7 +503,11 @@ export default function ProtectedApp() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div
+      className="flex flex-col h-screen bg-gray-50"
+      data-testid="chat-app"
+      data-hydrated={isHydrated ? "true" : "false"}
+    >
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4">

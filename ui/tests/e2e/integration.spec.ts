@@ -1,4 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, Page } from "@playwright/test";
+
+const waitForLoginHydration = async (page: Page) => {
+  const container = page.locator('[data-testid="login-form"]');
+  await container.waitFor();
+  await expect(container).toHaveAttribute("data-hydrated", "true");
+};
 
 test.describe("Navigation and Routing", () => {
   test.skip("should redirect to login when accessing app without authentication", async ({
@@ -41,6 +47,7 @@ test.describe("Navigation and Routing", () => {
     });
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await page.fill('input[type="text"]', "admin");
     await page.fill('input[type="password"]', "admin");
     await page.click('button[type="submit"]');
@@ -51,6 +58,7 @@ test.describe("Navigation and Routing", () => {
   test("should handle direct URL access", async ({ page }) => {
     // Should be able to access login page directly
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await expect(page.locator("h2").first()).toContainText(
       "Sign in to RAG Chat",
     );
@@ -63,6 +71,7 @@ test.describe("Navigation and Routing", () => {
 
   test("should preserve URL parameters", async ({ page }) => {
     await page.goto("/login?redirect=/app");
+    await waitForLoginHydration(page);
 
     // URL should maintain the query parameter
     expect(page.url()).toContain("redirect=/app");
@@ -81,6 +90,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await page.fill('input[type="text"]', "admin");
     await page.fill('input[type="password"]', "admin");
     await page.click('button[type="submit"]');
@@ -97,6 +107,7 @@ test.describe("Error Handling", () => {
     });
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await page.fill('input[type="text"]', "admin");
     await page.fill('input[type="password"]', "admin");
 
@@ -115,6 +126,7 @@ test.describe("Responsive Design", () => {
     await page.setViewportSize({ width: 375, height: 667 }); // iPhone SE
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
 
     // Login form should be visible and usable
     await expect(page.locator('input[type="text"]')).toBeVisible();
@@ -126,6 +138,7 @@ test.describe("Responsive Design", () => {
     await page.setViewportSize({ width: 768, height: 1024 }); // iPad
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
 
     // Interface should adapt to tablet size
     await expect(page.locator(".max-w-md")).toBeVisible();
@@ -135,6 +148,7 @@ test.describe("Responsive Design", () => {
     await page.setViewportSize({ width: 1920, height: 1080 }); // Desktop
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
 
     // Should use full width appropriately
     await expect(page.locator('input[type="text"]')).toBeVisible();
@@ -145,6 +159,7 @@ test.describe("Performance", () => {
   test("should load login page quickly", async ({ page }) => {
     const startTime = Date.now();
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await page.waitForLoadState("networkidle");
     const loadTime = Date.now() - startTime;
 
@@ -170,6 +185,7 @@ test.describe("Performance", () => {
     });
 
     await page.goto("/login");
+    await waitForLoginHydration(page);
     await page.waitForLoadState("networkidle");
 
     // Filter out known development warnings
@@ -187,6 +203,7 @@ test.describe("Performance", () => {
 test.describe("Security", () => {
   test("should not expose sensitive data in HTML", async ({ page }) => {
     await page.goto("/login");
+    await waitForLoginHydration(page);
 
     const content = await page.content();
 
@@ -199,6 +216,7 @@ test.describe("Security", () => {
 
   test("should have proper form security attributes", async ({ page }) => {
     await page.goto("/login");
+    await waitForLoginHydration(page);
 
     // Password field should be properly masked
     await expect(page.locator('input[type="password"]')).toHaveAttribute(
@@ -219,6 +237,7 @@ test.describe("Security", () => {
 
   test("should handle CSP headers properly", async ({ page }) => {
     const response = await page.goto("/login");
+    await waitForLoginHydration(page);
 
     // Should have loaded successfully despite any CSP restrictions
     expect(response?.status()).toBe(200);
