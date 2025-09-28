@@ -81,7 +81,9 @@ class TelegramIndexer:
                 return default
             return int(value)
         except (TypeError, ValueError):
-            logger.debug("Invalid value for %s=%s; using default %s", name, value, default)
+            logger.debug(
+                "Invalid value for %s=%s; using default %s", name, value, default
+            )
             return default
 
     async def initialize(self):
@@ -295,9 +297,7 @@ class TelegramIndexer:
         )
 
         edit_builder = events.MessageEdited(chats=chat_filters)
-        self.tg_client.client.add_event_handler(
-            self._on_message_edit, edit_builder
-        )
+        self.tg_client.client.add_event_handler(self._on_message_edit, edit_builder)
 
         self._event_handlers.extend(
             [
@@ -341,9 +341,7 @@ class TelegramIndexer:
             if message is None or getattr(message, "action", None):
                 return
 
-            msg_data = self.tg_client.extract_message_data(
-                message, chat_info["entity"]
-            )
+            msg_data = self.tg_client.extract_message_data(message, chat_info["entity"])
             msg_data["chat_id"] = chat_id_str
             msg_data["source_title"] = chat_info.get("title")
             msg_data["chat_username"] = chat_info.get("username")
@@ -412,9 +410,7 @@ class TelegramIndexer:
             reverse=True,
             min_message_id=resume_from,
         ):
-            msg_data = self.tg_client.extract_message_data(
-                message, chat_info["entity"]
-            )
+            msg_data = self.tg_client.extract_message_data(message, chat_info["entity"])
             msg_data["chat_id"] = chat_id
             msg_data["source_title"] = chat_info.get("title")
             msg_data["chat_username"] = chat_info.get("username")
@@ -461,9 +457,7 @@ class TelegramIndexer:
             since_date=since_date,
             reverse=True,
         ):
-            msg_data = self.tg_client.extract_message_data(
-                message, chat_info["entity"]
-            )
+            msg_data = self.tg_client.extract_message_data(message, chat_info["entity"])
             msg_data["chat_id"] = chat_id
             msg_data["source_title"] = chat_info.get("title")
             msg_data["chat_username"] = chat_info.get("username")
@@ -546,7 +540,11 @@ class TelegramIndexer:
 
     async def _hourly_sweep_loop(self) -> None:
         interval_seconds = self.hourly_sweep_interval_minutes * 60
-        if interval_seconds <= 0 or self.hourly_sweep_days <= 0 or not self.target_chats:
+        if (
+            interval_seconds <= 0
+            or self.hourly_sweep_days <= 0
+            or not self.target_chats
+        ):
             return
 
         try:
