@@ -119,6 +119,7 @@ export interface ChatCitation {
   message_date?: number;
   chat_username?: string;
   thread_id?: number;
+  chat_type?: string;
 }
 
 export interface ChatUsage {

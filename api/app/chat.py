@@ -63,6 +63,7 @@ class ChatCitation(BaseModel):
     message_date: Optional[int] = None
     chat_username: Optional[str] = None
     thread_id: Optional[int] = None
+    chat_type: Optional[str] = None
 
 
 class ChatUsage(BaseModel):
@@ -669,6 +670,7 @@ class ChatService:
                                 getattr(result, "chat_username", None)
                             ),
                             thread_id=_safe_int(getattr(result, "thread_id", None)),
+                            chat_type=_safe_str(getattr(result, "chat_type", None)),
                         )
                     )
 
