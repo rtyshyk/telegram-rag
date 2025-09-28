@@ -7,15 +7,31 @@ const waitForLoginHydration = async (page: Page) => {
 };
 
 test.describe("Navigation and Routing", () => {
-  test.skip("should redirect to login when accessing app without authentication", async ({
-    page,
-  }) => {
-    // Skip this test until authentication protection is implemented
-    await page.goto("/app");
+    test("should redirect to login when accessing app without authentication", async ({
+      page,
+    }) => {
+      await page.route("http://localhost:8000/**", async (route) => {
+        const url = route.request().url();
+        if (url.includes("/models") || url.includes("/chats")) {
+          await route.fulfill({
+            status: 401,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: "unauthorized" }),
+          });
+          return;
+        }
 
-    // Should redirect to login page
-    await expect(page).toHaveURL("/login");
-  });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true }),
+        });
+      });
+
+      await page.goto("/app");
+      await page.waitForURL("**/login");
+      await waitForLoginHydration(page);
+    });
 
   test("should redirect to app after successful login", async ({ page }) => {
     // Mock all API endpoints
