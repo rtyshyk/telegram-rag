@@ -394,7 +394,7 @@ export default function ProtectedApp() {
       chatId: citation.chat_id,
       messageId: citation.message_id,
       sourceTitle: citation.source_title,
-      chatType: undefined,
+      chatType: citation.chat_type,
       chatUsername: citation.chat_username,
       threadId: citation.thread_id,
     });
