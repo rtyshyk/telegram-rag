@@ -68,6 +68,16 @@ describe("formatTelegramLink", () => {
     expect(link).toBe("https://t.me/c/2307581122/3266");
   });
 
+  it("returns community topic link when thread id provided", () => {
+    const link = formatTelegramLink({
+      chatId: "1373212204",
+      messageId: 109348,
+      chatType: "group",
+      threadId: 109342,
+    });
+    expect(link).toBe("https://t.me/c/1373212204/109342/109348");
+  });
+
   it("returns saved messages link", () => {
     const link = formatTelegramLink({
       chatId: "self",

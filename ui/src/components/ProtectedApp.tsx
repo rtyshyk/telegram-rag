@@ -396,6 +396,7 @@ export default function ProtectedApp() {
       sourceTitle: citation.source_title,
       chatType: undefined,
       chatUsername: citation.chat_username,
+      threadId: citation.thread_id,
     });
   };
 
@@ -817,6 +818,7 @@ export default function ProtectedApp() {
                             sourceTitle: r.source_title,
                             chatType: r.chat_type,
                             chatUsername: r.chat_username,
+                            threadId: r.thread_id,
                           }),
                           "_blank",
                         )

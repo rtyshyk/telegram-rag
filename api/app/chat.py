@@ -62,6 +62,7 @@ class ChatCitation(BaseModel):
     source_title: Optional[str] = None
     message_date: Optional[int] = None
     chat_username: Optional[str] = None
+    thread_id: Optional[int] = None
 
 
 class ChatUsage(BaseModel):
@@ -632,6 +633,20 @@ class ChatService:
             def _safe_str(value: Any | None) -> str | None:
                 return value if isinstance(value, str) and value else None
 
+            def _safe_int(value: Any | None) -> int | None:
+                if isinstance(value, bool) or value is None:
+                    return None
+                if isinstance(value, int):
+                    return value
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if stripped and stripped.lstrip("-").isdigit():
+                        try:
+                            return int(stripped)
+                        except ValueError:
+                            return None
+                return None
+
             citations = []
             if should_search and search_results:
                 for i, orig_idx in enumerate(selected_indices):
@@ -640,15 +655,20 @@ class ChatService:
                         ChatCitation(
                             id=getattr(result, "id", ""),
                             chat_id=getattr(result, "chat_id", ""),
-                            message_id=getattr(result, "message_id", 0),
-                            chunk_idx=getattr(result, "chunk_idx", 0),
+                            message_id=_safe_int(getattr(result, "message_id", None))
+                            or 0,
+                            chunk_idx=_safe_int(getattr(result, "chunk_idx", None))
+                            or 0,
                             source_title=_safe_str(
                                 getattr(result, "source_title", None)
                             ),
-                            message_date=getattr(result, "message_date", None),
+                            message_date=_safe_int(
+                                getattr(result, "message_date", None)
+                            ),
                             chat_username=_safe_str(
                                 getattr(result, "chat_username", None)
                             ),
+                            thread_id=_safe_int(getattr(result, "thread_id", None)),
                         )
                     )
 

@@ -4,6 +4,7 @@ export interface TelegramLinkOptions {
   sourceTitle?: string;
   chatType?: string;
   chatUsername?: string | null;
+  threadId?: number | null;
 }
 
 const normalizeUsername = (username?: string | null) =>
@@ -17,12 +18,15 @@ export const formatTelegramLink = ({
   sourceTitle,
   chatType,
   chatUsername,
+  threadId,
 }: TelegramLinkOptions): string => {
   const normalizedUsername = normalizeUsername(chatUsername);
   const rawId = chatId?.trim() ?? "";
   const chatTypeLower = chatType?.toLowerCase();
   const isPrivateType =
-    chatTypeLower === "private" || chatTypeLower === "user" || chatTypeLower === "bot";
+    chatTypeLower === "private" ||
+    chatTypeLower === "user" ||
+    chatTypeLower === "bot";
   const isGroupLikeType =
     chatTypeLower === "group" ||
     chatTypeLower === "supergroup" ||
@@ -33,7 +37,10 @@ export const formatTelegramLink = ({
   const isLikelyDirectId = isNumeric && !rawId.startsWith("-");
   const directChat =
     isPrivateType ||
-    (!isGroupLikeType && isUnknownType && !normalizedUsername && isLikelyDirectId);
+    (!isGroupLikeType &&
+      isUnknownType &&
+      !normalizedUsername &&
+      isLikelyDirectId);
 
   if (normalizedUsername) {
     if (isPrivateType) {
@@ -57,7 +64,9 @@ export const formatTelegramLink = ({
   if (isNumericId(rawId)) {
     const sanitized = rawId.replace(/^-(100)?/, "").replace(/^0+/, "");
     if (sanitized) {
-      return `https://t.me/c/${sanitized}/${messageId}`;
+      const threadSegment =
+        typeof threadId === "number" && threadId > 0 ? `/${threadId}` : "";
+      return `https://t.me/c/${sanitized}${threadSegment}/${messageId}`;
     }
   }
 
