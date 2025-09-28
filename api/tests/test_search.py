@@ -56,8 +56,8 @@ class TestVespaSearchClient:
     @pytest.fixture
     def search_client(self, mock_http_client, mock_embedder, monkeypatch):
         monkeypatch.setattr(settings, "rerank_enabled", False)
-        monkeypatch.setattr(settings, "cohere_stub", False)
-        monkeypatch.setattr(settings, "cohere_api_key", None)
+        monkeypatch.setattr(settings, "voyage_stub", False)
+        monkeypatch.setattr(settings, "voyage_api_key", None)
         client = VespaSearchClient(http=mock_http_client)
         client.embedder = mock_embedder
         return client
@@ -434,7 +434,7 @@ class TestVespaSearchClient:
         """Ensure rerank stub reorders results and increases Vespa hits."""
 
         monkeypatch.setattr(settings, "rerank_enabled", True)
-        monkeypatch.setattr(settings, "cohere_stub", True)
+        monkeypatch.setattr(settings, "voyage_stub", True)
         monkeypatch.setattr(settings, "rerank_candidate_limit", 5)
         monkeypatch.setattr(settings, "openai_api_key", "sk-test")
 

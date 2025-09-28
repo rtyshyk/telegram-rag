@@ -5,7 +5,7 @@ Self-hosted retrieval-augmented generation stack for searching and chatting over
 ## Highlights
 
 - Index DMs, groups, channels, and Saved Messages with Telethon and store content in Postgres
-- Hybrid Vespa retrieval (vector + BM25 + recency) with optional Cohere rerank
+- Hybrid Vespa retrieval (vector + BM25 + recency) with optional VoyageAI rerank
 - Chat workflow that compresses context, answers strictly from your data, and returns citations
 - Astro + React interface with login, filters, live search results, and model selection
 - Docker-first deployment with automatic Vespa package activation on startup
@@ -27,7 +27,7 @@ Self-hosted retrieval-augmented generation stack for searching and chatting over
 - Docker and Docker Compose
 - Telegram API ID + hash and a phone number for login
 - OpenAI API key (for embeddings/LLM)
-- Optional: Cohere API key for reranking
+- Optional: VoyageAI API key for reranking
 
 ## Setup
 
@@ -37,7 +37,7 @@ Self-hosted retrieval-augmented generation stack for searching and chatting over
    cd telegram-rag
    cp .env.example .env
    ```
-2. Edit `.env` with your credentials. Required values include `APP_USER`, `APP_USER_HASH_BCRYPT`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `OPENAI_API_KEY`. Optional keys such as `COHERE_API_KEY` enable reranking.
+2. Edit `.env` with your credentials. Required values include `APP_USER`, `APP_USER_HASH_BCRYPT`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `OPENAI_API_KEY`. Optional keys such as `VOYAGE_API_KEY` enable reranking.
 3. Install local tooling (recommended for contributors):
    ```bash
    make install        # api + indexer dependencies
@@ -118,7 +118,7 @@ scripts/            Helpers: deploy-vespa.sh, wait_for_health.sh, smoke_tests.sh
 - **Cannot log in**: confirm `APP_USER` and `APP_USER_HASH_BCRYPT`; check system clock for cookie expiry.
 - **Indexer stalled**: ensure the Telethon `.session` file exists on the Docker volume and inspect `docker compose logs indexer` for rate limiting.
 - **Empty search results**: verify Vespa deployment (`docker compose logs vespa-deploy`) and that embeddings populated successfully.
-- **Rerank skipped**: set `COHERE_API_KEY` and `RERANK_ENABLED=true`.
+- **Rerank skipped**: set `VOYAGE_API_KEY` and `RERANK_ENABLED=true`.
 
 ## Security & Privacy
 
