@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Optional
+import unicodedata
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 from pydantic import BaseModel
@@ -22,15 +25,25 @@ class SearchRequest(BaseModel):
     hybrid: bool = True
 
 
+class SearchSpan(BaseModel):
+    start_id: int
+    end_id: int
+    start_ts: Optional[int] = None
+    end_ts: Optional[int] = None
+
+
 class SearchResult(BaseModel):
     id: str
     text: str
     chat_id: str
     message_id: int
-    chunk_idx: int
+    chunk_idx: int = 0
     score: float
+    seed_score: float
     retrieval_score: Optional[float] = None
     rerank_score: Optional[float] = None
+    span: SearchSpan
+    message_count: int
     sender: Optional[str] = None
     sender_username: Optional[str] = None
     chat_username: Optional[str] = None
@@ -47,6 +60,33 @@ class ChatInfo(BaseModel):
     source_title: Optional[str] = None
     chat_type: Optional[str] = None
     message_count: int = 0
+
+
+@dataclass
+class SeedHit:
+    id: str
+    chat_id: str
+    message_id: int
+    message_date_ms: Optional[int]
+    text: str
+    score: float
+    fields: Dict[str, Any]
+
+
+@dataclass
+class MessageRecord:
+    message_id: int
+    message_date_ms: Optional[int]
+    sender: Optional[str]
+    sender_username: Optional[str]
+    text: str
+    source_title: Optional[str]
+    chat_type: Optional[str]
+    chat_username: Optional[str]
+    edit_date: Optional[int]
+    thread_id: Optional[int]
+    has_link: Optional[bool]
+    raw_fields: Dict[str, Any]
 
 
 class EmbeddingProvider:
@@ -210,6 +250,9 @@ class VoyageReranker:
 
 
 class VespaSearchClient:
+    _CYRILLIC_RE = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
+    _TOKEN_RE = re.compile(r"[0-9A-Za-z\u0400-\u04FF]+", re.UNICODE)
+
     def __init__(self, http: Optional[httpx.AsyncClient] = None):
         self.endpoint = settings.vespa_endpoint.rstrip("/")
         self.http = http or httpx.AsyncClient(timeout=20)
@@ -227,56 +270,541 @@ class VespaSearchClient:
             await self.reranker.aclose()
 
     async def search(self, req: SearchRequest) -> List[SearchResult]:
-        if not req.q.strip():
+        query = req.q.strip()
+        if not query:
             return []
-        candidate_limit = req.limit
+
+        final_limit = max(1, min(req.limit, settings.search_context_max_return))
+        seed_limit = max(settings.search_seed_limit, final_limit)
+
+        seed_request = (
+            req
+            if seed_limit == req.limit
+            else req.model_copy(update={"limit": seed_limit})
+        )
+
+        yql, body, _ = await self._build_query(seed_request)
+
+        try:
+            data = await self._execute_search(body)
+        except Exception as exc:
+            logger.error("Vespa search error: %s", exc)
+            return []
+
+        logger.debug(
+            "seed_yql=%s hits_field=%s",
+            yql,
+            data.get("root", {}).get("fields", {}),
+        )
+
+        seed_hits = self._parse_seed_hits(data.get("root", {}).get("children", []))
+        filtered_seeds = self._filter_seeds(seed_hits)
+
+        if not filtered_seeds:
+            return []
+
+        candidates: List[SearchResult] = []
+        expand_tasks = [self._build_candidate(seed) for seed in filtered_seeds]
+        expanded = await asyncio.gather(*expand_tasks, return_exceptions=True)
+
+        for seed, result in zip(filtered_seeds, expanded):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "Context expansion failed for %s:%s → %s",
+                    seed.chat_id,
+                    seed.message_id,
+                    result,
+                )
+                continue
+            if result is None:
+                continue
+            candidates.append(result)
+
+        if not candidates:
+            return []
+
+        candidates.sort(key=lambda c: c.seed_score, reverse=True)
+
         reranker = self.reranker
         if reranker and reranker.enabled:
-            candidate_limit = max(req.limit, settings.rerank_candidate_limit)
-        fetch_request = (
-            req
-            if candidate_limit == req.limit
-            else req.model_copy(update={"limit": candidate_limit})
-        )
-        yql, body, query_params = await self._build_query(fetch_request)
-        try:
-            resp = await self.http.post(f"{self.endpoint}/search/", json=body)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.error(f"Vespa search error: {e}")
+            limited_candidates = candidates[: settings.rerank_candidate_limit]
+            return await reranker.rerank(query, limited_candidates, final_limit)
+
+        return candidates[:final_limit]
+
+    async def _execute_search(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        resp = await self.http.post(f"{self.endpoint}/search/", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _parse_seed_hits(
+        self, hits: Optional[Sequence[Dict[str, Any]]]
+    ) -> List[SeedHit]:
+        if not hits:
             return []
-        logger.debug(
-            "YQL=%s hits_field=%s", yql, data.get("root", {}).get("fields", {})
-        )
-        hits = data.get("root", {}).get("children", []) or []
-        results: List[SearchResult] = []
-        for h in hits:
-            fields = h.get("fields", {})
-            base_score = float(h.get("relevance", 0.0))
-            results.append(
-                SearchResult(
-                    id=fields.get("id", ""),
-                    text=fields.get("text", ""),
-                    chat_id=fields.get("chat_id", ""),
-                    message_id=int(fields.get("message_id", 0) or 0),
-                    chunk_idx=int(fields.get("chunk_idx", 0) or 0),
-                    score=base_score,
-                    retrieval_score=base_score,
-                    sender=fields.get("sender"),
-                    sender_username=fields.get("sender_username"),
-                    chat_username=fields.get("chat_username"),
-                    message_date=fields.get("message_date"),
-                    source_title=fields.get("source_title"),
-                    chat_type=fields.get("chat_type"),
-                    edit_date=fields.get("edit_date"),
-                    thread_id=fields.get("thread_id"),
-                    has_link=fields.get("has_link"),
+
+        seeds: List[SeedHit] = []
+        for hit in hits:
+            fields = hit.get("fields", {}) or {}
+            chat_id = fields.get("chat_id")
+            message_id = self._coerce_int(fields.get("message_id"))
+            if not chat_id or message_id is None:
+                continue
+            score_value = hit.get("relevance", 0.0)
+            try:
+                score = float(score_value)
+            except (TypeError, ValueError):
+                score = 0.0
+            message_date_ms = self._coerce_epoch_ms(fields.get("message_date"))
+            text = self._safe_text(fields.get("text"))
+            seeds.append(
+                SeedHit(
+                    id=fields.get("id") or f"{chat_id}:{message_id}",
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    message_date_ms=message_date_ms,
+                    text=text,
+                    score=score,
+                    fields=fields,
                 )
             )
-        if reranker and reranker.enabled:
-            return await reranker.rerank(req.q, results, req.limit)
-        return results[: req.limit]
+
+        return seeds
+
+    def _filter_seeds(self, seeds: Sequence[SeedHit]) -> List[SeedHit]:
+        if not seeds:
+            return []
+
+        per_chat = max(1, settings.search_seeds_per_chat)
+        id_gap = max(0, settings.search_seed_dedupe_message_gap)
+        time_gap_ms = max(0, settings.search_seed_dedupe_time_gap_seconds) * 1000
+
+        sorted_seeds = sorted(seeds, key=lambda seed: seed.score, reverse=True)
+        selected_by_chat: Dict[str, List[SeedHit]] = {}
+        selected: List[SeedHit] = []
+
+        for seed in sorted_seeds:
+            chat_selected = selected_by_chat.setdefault(seed.chat_id, [])
+            if len(chat_selected) >= per_chat:
+                continue
+
+            too_close = False
+            for existing in chat_selected:
+                if id_gap and abs(seed.message_id - existing.message_id) <= id_gap:
+                    too_close = True
+                    break
+                if (
+                    time_gap_ms
+                    and seed.message_date_ms is not None
+                    and existing.message_date_ms is not None
+                    and abs(seed.message_date_ms - existing.message_date_ms)
+                    <= time_gap_ms
+                ):
+                    too_close = True
+                    break
+
+            if too_close:
+                continue
+
+            chat_selected.append(seed)
+            selected.append(seed)
+
+        if selected:
+            return selected
+
+        # Fallback: ensure at least one seed per chat if dedupe removed all
+        fallback: List[SeedHit] = []
+        seen_chats: set[str] = set()
+        for seed in sorted_seeds:
+            if seed.chat_id in seen_chats:
+                continue
+            seen_chats.add(seed.chat_id)
+            fallback.append(seed)
+        return fallback
+
+    async def _build_candidate(self, seed: SeedHit) -> Optional[SearchResult]:
+        neighbors = await self._fetch_neighbors(seed)
+        if not neighbors:
+            return None
+        return self._assemble_candidate(seed, neighbors)
+
+    async def _fetch_neighbors(self, seed: SeedHit) -> List[MessageRecord]:
+        window = max(0, settings.search_neighbor_message_window)
+        min_id = max(seed.message_id - window, 0)
+        max_id = seed.message_id + window
+        message_clause = f"(message_id >= {min_id} AND message_id <= {max_id})"
+
+        filters = [f"chat_id contains '{self._escape_chat_id(seed.chat_id)}'"]
+
+        thread_id = self._coerce_int(seed.fields.get("thread_id"))
+        if thread_id is not None:
+            filters.append(f"thread_id = {thread_id}")
+
+        time_clause = None
+        if seed.message_date_ms is not None:
+            window_ms = max(0, settings.search_neighbor_time_window_minutes) * 60_000
+            start_ms = max(seed.message_date_ms - window_ms, 0)
+            end_ms = seed.message_date_ms + window_ms
+            time_clause = f"(message_date >= {start_ms} AND message_date <= {end_ms})"
+
+        primary_clauses = filters + [message_clause]
+        if time_clause:
+            primary_clauses.append(time_clause)
+
+        where_clause = " and ".join(primary_clauses) if primary_clauses else "true"
+        yql = f"select * from message where {where_clause} order by message_id asc"
+
+        body = {
+            "yql": yql,
+            "hits": settings.search_candidate_max_messages,
+            "ranking": "default",
+            "timeout": "5s",
+        }
+
+        data = await self._execute_search(body)
+        messages = self._parse_message_hits(data.get("root", {}).get("children", []))
+
+        if len(messages) < settings.search_neighbor_min_messages and time_clause:
+            union_clause = " and ".join(
+                filters + [f"({message_clause}) OR {time_clause}"]
+            )
+            union_yql = (
+                f"select * from message where {union_clause} order by message_id asc"
+            )
+            union_body = {
+                "yql": union_yql,
+                "hits": settings.search_candidate_max_messages,
+                "ranking": "default",
+                "timeout": "5s",
+            }
+            union_data = await self._execute_search(union_body)
+            extra = self._parse_message_hits(
+                union_data.get("root", {}).get("children", [])
+            )
+            messages = self._merge_messages(messages, extra)
+
+        messages.sort(key=lambda m: (m.message_id, m.message_date_ms or 0))
+        return messages
+
+    def _parse_message_hits(
+        self, hits: Optional[Sequence[Dict[str, Any]]]
+    ) -> List[MessageRecord]:
+        if not hits:
+            return []
+
+        records: List[MessageRecord] = []
+        for hit in hits:
+            fields = hit.get("fields", {}) or {}
+            message_id = self._coerce_int(fields.get("message_id"))
+            if message_id is None:
+                continue
+            text = self._safe_text(fields.get("text"))
+            message_date_ms = self._coerce_epoch_ms(fields.get("message_date"))
+            records.append(
+                MessageRecord(
+                    message_id=message_id,
+                    message_date_ms=message_date_ms,
+                    sender=self._safe_optional_str(fields.get("sender")),
+                    sender_username=self._safe_optional_str(
+                        fields.get("sender_username")
+                    ),
+                    text=text,
+                    source_title=self._safe_optional_str(fields.get("source_title")),
+                    chat_type=self._safe_optional_str(fields.get("chat_type")),
+                    chat_username=self._safe_optional_str(fields.get("chat_username")),
+                    edit_date=self._coerce_epoch_seconds(fields.get("edit_date")),
+                    thread_id=self._coerce_int(fields.get("thread_id")),
+                    has_link=self._coerce_optional_bool(fields.get("has_link")),
+                    raw_fields=fields,
+                )
+            )
+
+        return records
+
+    def _merge_messages(
+        self, base: Sequence[MessageRecord], extra: Sequence[MessageRecord]
+    ) -> List[MessageRecord]:
+        merged: Dict[int, MessageRecord] = {msg.message_id: msg for msg in base}
+        for msg in extra:
+            existing = merged.get(msg.message_id)
+            if existing is None or (not existing.text and msg.text):
+                merged[msg.message_id] = msg
+        result = list(merged.values())
+        result.sort(key=lambda m: (m.message_id, m.message_date_ms or 0))
+        return result
+
+    def _assemble_candidate(
+        self, seed: SeedHit, messages: Sequence[MessageRecord]
+    ) -> Optional[SearchResult]:
+        if not messages:
+            return None
+
+        dedup: Dict[int, MessageRecord] = {}
+        for msg in messages:
+            existing = dedup.get(msg.message_id)
+            if existing is None or (not existing.text and msg.text):
+                dedup[msg.message_id] = msg
+
+        if seed.message_id not in dedup:
+            dedup[seed.message_id] = MessageRecord(
+                message_id=seed.message_id,
+                message_date_ms=seed.message_date_ms,
+                sender=self._safe_optional_str(seed.fields.get("sender")),
+                sender_username=self._safe_optional_str(
+                    seed.fields.get("sender_username")
+                ),
+                text=self._safe_text(seed.fields.get("text") or seed.text),
+                source_title=self._safe_optional_str(seed.fields.get("source_title")),
+                chat_type=self._safe_optional_str(seed.fields.get("chat_type")),
+                chat_username=self._safe_optional_str(seed.fields.get("chat_username")),
+                edit_date=self._coerce_epoch_seconds(seed.fields.get("edit_date")),
+                thread_id=self._coerce_int(seed.fields.get("thread_id")),
+                has_link=self._coerce_optional_bool(seed.fields.get("has_link")),
+                raw_fields=seed.fields,
+            )
+
+        ordered = sorted(
+            dedup.values(), key=lambda m: (m.message_id, m.message_date_ms or 0)
+        )
+        filtered = [msg for msg in ordered if msg.text]
+
+        if not filtered:
+            return None
+
+        max_messages = max(1, settings.search_candidate_max_messages)
+        if len(filtered) > max_messages:
+            seed_index = next(
+                (
+                    idx
+                    for idx, msg in enumerate(filtered)
+                    if msg.message_id == seed.message_id
+                ),
+                len(filtered) // 2,
+            )
+            half = max_messages // 2
+            start = max(0, seed_index - half)
+            end = start + max_messages
+            filtered = filtered[start:end]
+
+        lines = [self._format_message_line(msg) for msg in filtered]
+        max_chars = max(1, settings.search_candidate_token_limit) * 4
+        text_block = "\n".join(lines)
+
+        while len(text_block) > max_chars and len(filtered) > 1:
+            drop_index = 0
+            if filtered[0].message_id == seed.message_id and len(filtered) > 1:
+                drop_index = 1
+            filtered.pop(drop_index)
+            lines.pop(drop_index)
+            text_block = "\n".join(lines)
+
+        if not text_block.strip():
+            return None
+
+        span_start = filtered[0]
+        span_end = filtered[-1]
+        span = SearchSpan(
+            start_id=span_start.message_id,
+            end_id=span_end.message_id,
+            start_ts=span_start.message_date_ms,
+            end_ts=span_end.message_date_ms,
+        )
+
+        seed_sender = self._safe_optional_str(seed.fields.get("sender"))
+        seed_sender_username = self._safe_optional_str(
+            seed.fields.get("sender_username")
+        )
+        seed_message_date_seconds = self._coerce_epoch_seconds(
+            seed.fields.get("message_date")
+        )
+        source_title = self._safe_optional_str(seed.fields.get("source_title"))
+        chat_type = self._safe_optional_str(seed.fields.get("chat_type"))
+        chat_username = self._safe_optional_str(seed.fields.get("chat_username"))
+        edit_date = self._coerce_epoch_seconds(seed.fields.get("edit_date"))
+        thread_id = self._coerce_int(seed.fields.get("thread_id"))
+
+        if not source_title:
+            source_title = next(
+                (msg.source_title for msg in filtered if msg.source_title), None
+            )
+        if not chat_type:
+            chat_type = next((msg.chat_type for msg in filtered if msg.chat_type), None)
+        if not chat_username:
+            chat_username = next(
+                (msg.chat_username for msg in filtered if msg.chat_username), None
+            )
+        if edit_date is None:
+            edit_date = next(
+                (msg.edit_date for msg in filtered if msg.edit_date is not None), None
+            )
+        if thread_id is None:
+            thread_id = next(
+                (msg.thread_id for msg in filtered if msg.thread_id is not None), None
+            )
+        if seed_sender is None:
+            seed_sender = next((msg.sender for msg in filtered if msg.sender), None)
+        if seed_sender_username is None:
+            seed_sender_username = next(
+                (msg.sender_username for msg in filtered if msg.sender_username),
+                None,
+            )
+
+        link_values = [
+            value for value in (msg.has_link for msg in filtered) if value is not None
+        ]
+        has_link_value = any(link_values) if link_values else None
+
+        return SearchResult(
+            id=f"{seed.chat_id}:{span.start_id}-{span.end_id}",
+            text=text_block,
+            chat_id=seed.chat_id,
+            message_id=seed.message_id,
+            score=seed.score,
+            seed_score=seed.score,
+            retrieval_score=seed.score,
+            rerank_score=None,
+            span=span,
+            message_count=len(filtered),
+            sender=seed_sender,
+            sender_username=seed_sender_username,
+            chat_username=chat_username,
+            message_date=seed_message_date_seconds,
+            source_title=source_title,
+            chat_type=chat_type,
+            edit_date=edit_date,
+            thread_id=thread_id,
+            has_link=has_link_value,
+        )
+
+    def _format_message_line(self, msg: MessageRecord) -> str:
+        text = msg.text.strip()
+        if not text:
+            return ""
+
+        return text
+
+    @staticmethod
+    def _normalise_whitespace(value: str) -> str:
+        return " ".join(value.split())
+
+    def _prepare_bm25_query(self, query: str) -> tuple[str, Optional[str]]:
+        """Normalise query for BM25 and add helpful inflection variants."""
+
+        cleaned = self._normalise_whitespace(query)
+        if not cleaned:
+            return "", None
+
+        tokens = self._TOKEN_RE.findall(cleaned.lower())
+        if not tokens:
+            return cleaned, None
+
+        seen_tokens = set(tokens)
+        extra_tokens: List[str] = []
+        uses_cyrillic = False
+
+        for token in tokens:
+            if self._CYRILLIC_RE.search(token):
+                uses_cyrillic = True
+            for variant in self._expand_token_variants(token):
+                if variant not in seen_tokens:
+                    seen_tokens.add(variant)
+                    extra_tokens.append(variant)
+
+        if extra_tokens:
+            cleaned = " ".join([cleaned, " ".join(extra_tokens)]).strip()
+
+        language_hint = "uk" if uses_cyrillic else None
+        return cleaned, language_hint
+
+    def _expand_token_variants(self, token: str) -> List[str]:
+        """Generate lightweight morphological variants for better recall."""
+
+        variants: List[str] = []
+
+        def add_variant(value: str) -> None:
+            candidate = value.strip()
+            if not candidate or candidate == token or candidate in variants:
+                return
+            variants.append(candidate)
+
+        ascii_variant = (
+            unicodedata.normalize("NFKD", token)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+            .lower()
+        )
+        if ascii_variant and ascii_variant != token:
+            add_variant(ascii_variant)
+
+        if self._CYRILLIC_RE.search(token):
+            base = token.rstrip("ь")
+            if base.endswith("є") or base.endswith("е"):
+                add_variant(f"{base}ш")
+                if len(base) >= 4:
+                    add_variant(f"{base}те")
+            if base.endswith("єш") and len(base) > 3:
+                add_variant(base[:-1])
+            if token.endswith("ш") and len(token) > 3:
+                add_variant(token[:-1])
+
+        return variants
+
+    def _safe_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value)
+        return self._normalise_whitespace(text)
+
+    @staticmethod
+    def _safe_optional_str(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _coerce_optional_bool(value: Any) -> Optional[bool]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"true", "1", "yes"}:
+            return True
+        if text in {"false", "0", "no"}:
+            return False
+        return None
+
+    @staticmethod
+    def _coerce_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _coerce_epoch_ms(cls, value: Any) -> Optional[int]:
+        raw = cls._coerce_int(value)
+        if raw is None:
+            return None
+        if raw < 10_000_000_000:  # seconds
+            raw *= 1000
+        return raw
+
+    @classmethod
+    def _coerce_epoch_seconds(cls, value: Any) -> Optional[int]:
+        ms = cls._coerce_epoch_ms(value)
+        if ms is None:
+            return None
+        return ms // 1000
+
+    @staticmethod
+    def _escape_chat_id(chat_id: str) -> str:
+        return chat_id.replace("'", "%27")
 
     async def get_available_chats(self) -> List[ChatInfo]:
         """Get list of available chats with aggregation"""
@@ -386,6 +914,8 @@ class VespaSearchClient:
                 )
                 req.hybrid = False
 
+        bm25_query, language_hint = self._prepare_bm25_query(req.q)
+
         bm25_clause = f"(userInput(@q))"
         where_segments = []
 
@@ -405,12 +935,16 @@ class VespaSearchClient:
             "hits": req.limit,
             "ranking": ranking_profile if req.hybrid else "default",
             "timeout": "5s",
-            "q": req.q,
+            "q": bm25_query,
         }
 
         # Add tensor in the correct format for Vespa
         if req.hybrid and embedded_vector is not None:
             body[f"input.query({tensor_param})"] = embedded_vector
+
+        if language_hint:
+            body["input.language"] = language_hint
+            query_params["language"] = language_hint
 
         return yql, body, query_params
 

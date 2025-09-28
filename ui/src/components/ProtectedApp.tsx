@@ -32,7 +32,8 @@ interface Message {
 
 const formatDate = (timestamp?: number) => {
   if (!timestamp) return "Unknown date";
-  return new Date(timestamp * 1000).toLocaleDateString("en-US", {
+  const ms = timestamp > 1e12 ? timestamp : timestamp * 1000;
+  return new Date(ms).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -97,73 +98,8 @@ export default function ProtectedApp() {
   // Aggregate multiple chunk results for the same (chat_id, message_id) into a single full message
   const aggregateSearchResults = (results: SearchResult[]): SearchResult[] => {
     if (!results || results.length === 0) return [];
-
-    // Preserve original ordering priority by first occurrence (already ranked by backend)
-    const groups = new Map<
-      string,
-      {
-        base: SearchResult;
-        parts: {
-          idx: number;
-          text: string;
-          chunk_idx: number;
-          score: number;
-        }[];
-        maxScore: number;
-      }
-    >();
-
-    const headerRegex = /^\[[^\]]+\]\n\n?/; // matches leading header like [2025-08-31 10:00 • Alice]
-
-    results.forEach((r, orderIdx) => {
-      const key = `${r.chat_id}:${r.message_id}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          base: { ...r, id: key, chunk_idx: 0 },
-          parts: [],
-          maxScore: r.score,
-        });
-      }
-      const g = groups.get(key)!;
-      g.maxScore = Math.max(g.maxScore, r.score);
-      // Extract chunk body (remove duplicated header after first chunk)
-      let text = r.text || "";
-      // For non-first chunk in a message, strip header if present to avoid repetition
-      if (g.parts.length > 0) {
-        text = text.replace(headerRegex, "").trimStart();
-      }
-      g.parts.push({
-        idx: orderIdx,
-        text,
-        chunk_idx: r.chunk_idx,
-        score: r.score,
-      });
-    });
-
-    // Build aggregated messages keeping original ordering by first appearance
-    const aggregated: SearchResult[] = [];
-    for (const [, g] of groups) {
-      // Sort parts by chunk_idx ascending to reconstruct message
-      g.parts.sort((a, b) => a.chunk_idx - b.chunk_idx);
-      const fullText = g.parts
-        .map((p) => p.text)
-        .join("\n")
-        .trim();
-      aggregated.push({
-        ...g.base,
-        text: fullText,
-        score: g.maxScore, // represent best score among chunks
-        chunk_idx: 0,
-      });
-    }
-
-    // Order aggregated messages by their highest score (desc), tie-break by message_id
-    aggregated.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.chat_id === b.chat_id) return a.message_id - b.message_id;
-      return a.chat_id.localeCompare(b.chat_id);
-    });
-    return aggregated;
+    // Return a shallow copy so state updates remain isolated.
+    return results.map((result) => ({ ...result }));
   };
 
   const runSearch = async (
@@ -699,7 +635,7 @@ export default function ProtectedApp() {
               </h2>
               {searchResults.length > 0 && !searchLoading && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Found {searchResults.length} message
+                  Found {searchResults.length} context
                   {searchResults.length !== 1 ? "s" : ""}
                   {currentSearchQuery &&
                     ` for "${currentSearchQuery.substring(0, 30)}${
@@ -804,9 +740,20 @@ export default function ProtectedApp() {
                       <span className="font-mono">
                         {r.chat_id}:{r.message_id}
                       </span>
+                      {r.span && (
+                        <span className="text-gray-600">
+                          {`Range ${
+                            r.span.start_id === r.span.end_id
+                              ? r.span.start_id
+                              : `${r.span.start_id}–${r.span.end_id}`
+                          } • ${r.message_count} msg${
+                            r.message_count !== 1 ? "s" : ""
+                          }`}
+                        </span>
+                      )}
                       {r.sender && (
-                        <span className="text-gray-700">
-                          by{" "}
+                        <span className="text-gray-600">
+                          Sent by{" "}
                           {r.sender_username
                             ? `@${r.sender_username}`
                             : r.sender}
@@ -814,10 +761,17 @@ export default function ProtectedApp() {
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="text-[10px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-medium">
-                      {r.score.toFixed(3)}
-                    </span>
+                  <div className="flex flex-col items-end gap-1 text-right">
+                    {typeof r.score === "number" && (
+                      <span className="text-[10px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-medium">
+                        Rerank {r.score.toFixed(3)}
+                      </span>
+                    )}
+                    {typeof r.seed_score === "number" && (
+                      <span className="text-[10px] px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                        Seed {r.seed_score.toFixed(3)}
+                      </span>
+                    )}
                     <button
                       onClick={() =>
                         window.open(
