@@ -81,17 +81,15 @@ test.describe("Chat Flow Tests", () => {
     await expect(page.locator('input[type="text"]')).toBeVisible();
   });
 
-  test.skip("session persistence workflow", async ({ page }) => {
-    // Skip until authentication is properly implemented
-    // Login
+  test("session persistence workflow", async ({ page }) => {
     await utils.login();
     await utils.assertAuthenticated();
 
-    // Reload page
     await page.reload();
+    await utils.waitForChatHydration();
 
-    // Should redirect to login (since we're using mocked session)
-    await utils.assertNotAuthenticated();
+    // Should remain authenticated after reload when session cookie exists
+    await utils.assertAuthenticated();
   });
 
   test("multiple messages workflow", async ({ page }) => {
