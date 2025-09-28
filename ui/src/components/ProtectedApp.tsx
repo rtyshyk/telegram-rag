@@ -12,8 +12,28 @@ import {
 } from "../lib/api";
 import { formatTelegramLink } from "../lib/telegram_links";
 
-const MAX_SEARCH_EXPANSION_LEVEL = 3;
-const SEARCH_EXPANSION_STEP = Math.max(1, DEFAULT_SEARCH_LIMIT);
+const CONTEXT_LIMIT_STORAGE_KEY = "searchContextLimit";
+const MIN_CONTEXT_LIMIT = 1;
+const MAX_CONTEXT_LIMIT = 25;
+const DEFAULT_CONTEXT_LIMIT = DEFAULT_SEARCH_LIMIT;
+
+const clampContextLimit = (value: number): number => {
+  const numeric = Number.isFinite(value) ? value : DEFAULT_CONTEXT_LIMIT;
+  return Math.min(MAX_CONTEXT_LIMIT, Math.max(MIN_CONTEXT_LIMIT, numeric));
+};
+
+const readStoredContextLimit = (): number => {
+  if (typeof window === "undefined") return DEFAULT_CONTEXT_LIMIT;
+  try {
+    const raw = window.localStorage.getItem(CONTEXT_LIMIT_STORAGE_KEY);
+    if (!raw) return DEFAULT_CONTEXT_LIMIT;
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isNaN(parsed)) return DEFAULT_CONTEXT_LIMIT;
+    return clampContextLimit(parsed);
+  } catch {
+    return DEFAULT_CONTEXT_LIMIT;
+  }
+};
 
 type ConversationHistoryEntry = {
   role: "user" | "assistant";
@@ -73,15 +93,34 @@ export default function ProtectedApp() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(true);
   const [currentSearchQuery, setCurrentSearchQuery] = useState<string>("");
-  const [searchExpansionLevel, setSearchExpansionLevel] = useState(0);
+  const [searchLimit, setSearchLimit] = useState<number>(() =>
+    readStoredContextLimit(),
+  );
+  const [contextLimitDraft, setContextLimitDraft] = useState<string>(() =>
+    String(readStoredContextLimit()),
+  );
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [selectedChat, setSelectedChat] = useState<string>("");
   const [chatError, setChatError] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchLimitRef = useRef(searchLimit);
   // Monotonic sequence to avoid race conditions between overlapping searches
   const searchSeqRef = useRef(0);
+
+  useEffect(() => {
+    searchLimitRef.current = searchLimit;
+    setContextLimitDraft(String(searchLimit));
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        CONTEXT_LIMIT_STORAGE_KEY,
+        String(searchLimit),
+      );
+    } catch {
+      // ignore storage write errors
+    }
+  }, [searchLimit]);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -117,48 +156,31 @@ export default function ProtectedApp() {
     }
   };
 
-  const limitForLevel = (level: number) =>
-    DEFAULT_SEARCH_LIMIT + level * SEARCH_EXPANSION_STEP;
-
   const runSearch = async (
     q: string,
     opts: {
       preserveOnEmpty?: boolean;
-      expansionLevel?: number;
-      resetExpansion?: boolean;
+      limitOverride?: number;
     } = {},
   ) => {
     const trimmed = q.trim();
-    const requestedLevel =
-      opts.expansionLevel ?? (opts.resetExpansion ? 0 : searchExpansionLevel);
-    const effectiveLevel = Math.min(
-      Math.max(requestedLevel, 0),
-      MAX_SEARCH_EXPANSION_LEVEL,
-    );
+    const limitSource =
+      typeof opts.limitOverride === "number"
+        ? opts.limitOverride
+        : searchLimitRef.current || searchLimit;
+    const targetLimit = clampContextLimit(limitSource);
 
     if (!trimmed) {
       if (!opts.preserveOnEmpty) {
-        // User manually cleared input: clear panel and reset scope
+        // User manually cleared input: clear panel
         setSearchResults([]);
         setCurrentSearchQuery("");
-        if (searchExpansionLevel !== 0) {
-          setSearchExpansionLevel(0);
-        }
-      } else if (
-        (opts.expansionLevel !== undefined || opts.resetExpansion) &&
-        searchExpansionLevel !== effectiveLevel
-      ) {
-        setSearchExpansionLevel(effectiveLevel);
       }
+      searchLimitRef.current = targetLimit;
       return;
     }
 
-    if (
-      (opts.expansionLevel !== undefined || opts.resetExpansion) &&
-      searchExpansionLevel !== effectiveLevel
-    ) {
-      setSearchExpansionLevel(effectiveLevel);
-    }
+    searchLimitRef.current = targetLimit;
 
     const seq = ++searchSeqRef.current; // capture sequence id
     setSearchLoading(true);
@@ -166,9 +188,8 @@ export default function ProtectedApp() {
     setCurrentSearchQuery(trimmed);
     try {
       const searchOpts: any = {
-        limit: limitForLevel(effectiveLevel),
+        limit: targetLimit,
         hybrid: true,
-        expansionLevel: effectiveLevel,
       };
       if (selectedChat) {
         searchOpts.chatId = selectedChat;
@@ -214,6 +235,8 @@ export default function ProtectedApp() {
       model_id: modelId,
       history,
     };
+
+    chatOpts.k = Math.max(1, searchLimitRef.current);
 
     if (chatId) {
       chatOpts.filters = {
@@ -386,32 +409,57 @@ export default function ProtectedApp() {
     });
   };
 
-  const handleBroadenSearch = async () => {
-    if (searchLoading || isLoading) return;
-    const query = currentSearchQuery.trim();
-    if (!query) return;
-    if (searchExpansionLevel >= MAX_SEARCH_EXPANSION_LEVEL) return;
-    const nextLevel = Math.min(
-      searchExpansionLevel + 1,
-      MAX_SEARCH_EXPANSION_LEVEL,
-    );
-    await runSearch(query, { preserveOnEmpty: true, expansionLevel: nextLevel });
-    await regenerateLastAssistantResponse();
+  const commitContextLimit = async (
+    nextValue: number,
+    { rerunSearch = true }: { rerunSearch?: boolean } = {},
+  ) => {
+    const clamped = clampContextLimit(nextValue);
+    searchLimitRef.current = clamped;
+    setContextLimitDraft(String(clamped));
+
+    const limitChanged = clamped !== searchLimit;
+    if (limitChanged) {
+      setSearchLimit(clamped);
+    }
+
+    if (rerunSearch && limitChanged && currentSearchQuery.trim()) {
+      await runSearch(currentSearchQuery, {
+        preserveOnEmpty: true,
+        limitOverride: clamped,
+      });
+      await regenerateLastAssistantResponse();
+    }
   };
 
-  const handleResetSearchScope = async () => {
-    if (searchExpansionLevel === 0 || searchLoading || isLoading) return;
-    const query = currentSearchQuery.trim();
-    if (!query) {
-      setSearchExpansionLevel(0);
+  const handleContextLimitBlur = () => {
+    if (!contextLimitDraft.trim()) {
+      setContextLimitDraft(String(searchLimit));
       return;
     }
-    await runSearch(query, {
-      preserveOnEmpty: true,
-      expansionLevel: 0,
-      resetExpansion: true,
-    });
-    await regenerateLastAssistantResponse();
+    const parsed = Number.parseInt(contextLimitDraft, 10);
+    if (Number.isNaN(parsed)) {
+      setContextLimitDraft(String(searchLimit));
+      return;
+    }
+    void commitContextLimit(parsed);
+  };
+
+  const handleContextLimitKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleContextLimitBlur();
+      return;
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setContextLimitDraft(String(searchLimit));
+      return;
+    }
+  };
+
+  const adjustContextLimit = (delta: number) => {
+    void commitContextLimit(searchLimit + delta);
   };
 
   // Re-run the most recent query when the chat filter changes
@@ -439,8 +487,6 @@ export default function ProtectedApp() {
     try {
       await runSearch(message, {
         preserveOnEmpty: true,
-        expansionLevel: 0,
-        resetExpansion: true,
       });
     } catch {
       // ignore search errors here; main chat flow continues
@@ -573,21 +619,11 @@ export default function ProtectedApp() {
     );
   };
 
-  const scopeLabel =
-    searchExpansionLevel === 0
-      ? "Standard scope"
-      : `Broadened ×${searchExpansionLevel}`;
-  const canBroadenSearch =
-    !!currentSearchQuery.trim() &&
-    !searchLoading &&
-    !isLoading &&
-    searchExpansionLevel < MAX_SEARCH_EXPANSION_LEVEL;
-  const nextScopeLevel = Math.min(
-    searchExpansionLevel + 1,
-    MAX_SEARCH_EXPANSION_LEVEL,
-  );
-  const requestedLimit = limitForLevel(searchExpansionLevel);
-  const nextScopeLimit = limitForLevel(nextScopeLevel);
+  const limitLabel = `${searchLimit} snippet${searchLimit !== 1 ? "s" : ""}`;
+  const canIncreaseLimit =
+    searchLimit < MAX_CONTEXT_LIMIT && !searchLoading && !isLoading;
+  const canDecreaseLimit =
+    searchLimit > MIN_CONTEXT_LIMIT && !searchLoading && !isLoading;
 
   return (
     <div
@@ -796,29 +832,51 @@ export default function ProtectedApp() {
                     }"`}
                 </p>
               )}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-3">
                 <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">
-                  {scopeLabel} • targeting up to {requestedLimit} snippet
-                  {requestedLimit !== 1 ? "s" : ""}
+                  Context limit
                 </span>
-                <button
-                  onClick={() => void handleBroadenSearch()}
-                  disabled={!canBroadenSearch}
-                  className="text-xs px-2 py-1.5 rounded-lg border border-blue-200 text-blue-600 font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Fetch more seeds and rerank more candidates"
-                >
-                  {searchExpansionLevel >= MAX_SEARCH_EXPANSION_LEVEL
-                    ? "Max scope"
-                    : `Broaden to ${nextScopeLimit}`}
-                </button>
-                {searchExpansionLevel > 0 && (
-                  <button
-                    onClick={() => void handleResetSearchScope()}
-                    className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 text-gray-600 font-medium hover:bg-gray-100"
-                  >
-                    Reset scope
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={MIN_CONTEXT_LIMIT}
+                    max={MAX_CONTEXT_LIMIT}
+                    step={1}
+                    value={contextLimitDraft}
+                    onChange={(event) =>
+                      setContextLimitDraft(event.target.value)
+                    }
+                    onBlur={handleContextLimitBlur}
+                    onKeyDown={handleContextLimitKeyDown}
+                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    aria-label="Context limit"
+                  />
+                  <div className="flex flex-col overflow-hidden rounded-md border border-gray-300">
+                    <button
+                      type="button"
+                      onClick={() => adjustContextLimit(1)}
+                      disabled={!canIncreaseLimit}
+                      className="text-xs leading-none px-3 py-1 bg-white hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-white"
+                      aria-label="Increase context limit"
+                      title="Increase context limit"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustContextLimit(-1)}
+                      disabled={!canDecreaseLimit}
+                      className="text-xs leading-none px-3 py-1 bg-white hover:bg-gray-100 border-t border-gray-200 disabled:opacity-40 disabled:hover:bg-white"
+                      aria-label="Decrease context limit"
+                      title="Decrease context limit"
+                    >
+                      −
+                    </button>
+                  </div>
+                </div>
+                <span className="text-[11px] text-gray-500">
+                  Shared across search and chat • {limitLabel}
+                </span>
               </div>
             </div>
             <button
@@ -1026,9 +1084,6 @@ export default function ProtectedApp() {
                 if (!nextValue.trim()) {
                   setSearchResults([]);
                   setCurrentSearchQuery("");
-                  if (searchExpansionLevel !== 0) {
-                    setSearchExpansionLevel(0);
-                  }
                 }
               }}
               onKeyDown={(e) => {
