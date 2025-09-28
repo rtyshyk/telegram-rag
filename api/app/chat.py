@@ -532,7 +532,10 @@ class ChatService:
             logger.info(f"Last message preview: {messages[-1]['content'][:200]}...")
 
             stream = await self.openai_client.chat.completions.create(
-                model=model_id, messages=messages, stream=True
+                model=model_id,
+                messages=messages,
+                stream=True,
+                reasoning_effort="minimal",
             )
 
             # Stream the response
