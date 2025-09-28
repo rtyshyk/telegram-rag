@@ -65,14 +65,14 @@ class EmbeddingProvider:
         return resp.data[0].embedding  # type: ignore[attr-defined]
 
 
-class CohereReranker:
-    """Optional reranker using Cohere's Rerank API (or local stub)."""
+class VoyageReranker:
+    """Optional reranker using VoyageAI's Rerank API (or local stub)."""
 
-    _RERANK_ENDPOINT = "https://api.cohere.com/v1/rerank"
+    _RERANK_ENDPOINT = "https://api.voyageai.com/v1/rerank"
 
     def __init__(self, http: Optional[httpx.AsyncClient] = None):
-        self.stub = bool(settings.cohere_stub)
-        self.api_key = settings.cohere_api_key
+        self.stub = bool(settings.voyage_stub)
+        self.api_key = settings.voyage_api_key
         self.model = settings.rerank_model
         self.enabled = settings.rerank_enabled and (self.stub or bool(self.api_key))
         self._http = http
@@ -84,7 +84,7 @@ class CohereReranker:
                 self._owns_http = True
         elif settings.rerank_enabled and not self.enabled:
             logger.warning(
-                "Rerank enabled but no Cohere API key provided; falling back to Vespa ranking."
+                "Rerank enabled but no Voyage API key provided; falling back to Vespa ranking."
             )
 
     async def aclose(self) -> None:
@@ -104,15 +104,14 @@ class CohereReranker:
             return self._rerank_stub(query, results, top_n)
 
         if not self._http or not self.api_key:
-            logger.warning("Cohere client not available; skipping rerank.")
+            logger.warning("Voyage client not available; skipping rerank.")
             return results[:top_n]
 
         payload = {
             "model": self.model,
             "query": query,
-            "documents": [r.text for r in results],
-            "top_n": min(top_n, len(results)),
-            "return_documents": False,
+            "documents": [result.text for result in results],
+            "top_k": min(top_n, len(results)),
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -126,19 +125,27 @@ class CohereReranker:
             response.raise_for_status()
             data = response.json()
         except Exception as exc:  # pragma: no cover - network errors
-            logger.warning("Cohere rerank failed: %s", exc)
+            logger.warning("Voyage rerank failed: %s", exc)
             return results[:top_n]
 
         reranked: List[SearchResult] = []
         seen_indices: set[int] = set()
 
-        for item in data.get("results", []):
+        items = data.get("data") or data.get("results", [])
+
+        for item in items:
             idx = item.get("index")
             if idx is None or idx >= len(results):
                 continue
             seen_indices.add(idx)
             result = results[idx]
-            score = float(item.get("relevance_score", result.score))
+            score_value = item.get("score")
+            if score_value is None:
+                score_value = item.get("relevance_score", result.score)
+            try:
+                score = float(score_value)
+            except (TypeError, ValueError):
+                score = result.score
             result.rerank_score = score
             result.score = score
             reranked.append(result)
@@ -207,10 +214,10 @@ class VespaSearchClient:
         self.endpoint = settings.vespa_endpoint.rstrip("/")
         self.http = http or httpx.AsyncClient(timeout=20)
         self.embedder = EmbeddingProvider()
-        self.reranker: Optional[CohereReranker] = None
+        self.reranker: Optional[VoyageReranker] = None
 
         if settings.rerank_enabled:
-            reranker = CohereReranker()
+            reranker = VoyageReranker()
             if reranker.enabled:
                 self.reranker = reranker
 

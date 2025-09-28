@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # Stubs for testing
     openai_stub: bool = False
     telethon_stub: bool = False
-    cohere_stub: bool = False
+    voyage_stub: bool = False
 
     # (Legacy Config class removed; using model_config for Pydantic v2.)
 

@@ -24,10 +24,10 @@ class Settings(BaseSettings):
     vespa_endpoint: str = "http://vespa:8080"
     search_default_limit: int = 20
     rerank_enabled: bool = False
-    cohere_api_key: str | None = None
-    rerank_model: str = "rerank-multilingual-v3.0"
+    voyage_api_key: str | None = None
+    rerank_model: str = "rerank-lite-1"
     rerank_candidate_limit: int = 40
-    cohere_stub: bool = False
+    voyage_stub: bool = False
     # Chat
     chat_default_k: int = 50
     chat_max_context_tokens: int = 50000
