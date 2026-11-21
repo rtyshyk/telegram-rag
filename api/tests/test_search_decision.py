@@ -62,6 +62,27 @@ class TestSearchDecisionMaker:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_skip_decision_still_searches_substantive_query(
+        self, search_decision_maker, mock_openai_client
+    ):
+        """If the model wrongly returns SKIP_SEARCH, still search on real questions."""
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = "SKIP_SEARCH"
+        mock_openai_client.chat.completions.create.return_value = mock_response
+
+        history = [
+            ChatMessage(role="user", content="хоумстейджер"),
+            ChatMessage(
+                role="assistant",
+                content="I don't see this information in your Telegram data.",
+            ),
+        ]
+        result = await search_decision_maker.should_search("хоумстейджер", history)
+        assert result is True
+
+    @pytest.mark.asyncio
     async def test_should_search_with_yes_decision(
         self, search_decision_maker, mock_openai_client
     ):

@@ -967,8 +967,7 @@ class TestOneshotBatchProgress:
 
         now = datetime(2026, 1, 1, 12, 0)
         assert (
-            _window_progress_segment(None, 1_700_000_000, 1_699_000_000, now, now)
-            == ""
+            _window_progress_segment(None, 1_700_000_000, 1_699_000_000, now, now) == ""
         )
 
     def test_window_progress_segment_zero_percent_no_eta(self):
@@ -1036,9 +1035,7 @@ class TestOneshotBatchProgress:
         mock_cli_args.chats = "Chat1"
         mock_cli_args.days = None
 
-        messages = [
-            self._create_mock_message(i, f"Message {i}") for i in range(1, 13)
-        ]
+        messages = [self._create_mock_message(i, f"Message {i}") for i in range(1, 13)]
         for idx, msg in enumerate(messages, start=1):
             msg.date.timestamp.return_value = datetime(2026, 1, 1, 12, idx).timestamp()
 

@@ -83,6 +83,18 @@ class Settings(BaseSettings):
         1800  # Soft cap on tokens per candidate (≈x4 chars)
     )
     search_context_max_return: int = 25  # Max context snippets returned to the caller
+    # Queries with at most this many significant tokens use stricter lexical-first ranking (Vespa).
+    search_short_query_max_significant_tokens: int = 3
+    search_lexical_supplement_hits: int = (
+        10  # Extra BM25-only fetch for head-term on short imperative queries
+    )
+    search_short_lexical_non_lexical_cap: int = (
+        5  # Max non-lexical seeds when lexical seeds exist
+    )
+    search_short_lexical_seed_cap: int = (
+        15  # Max seeds expanded for short lexical queries
+    )
+    search_expansion_concurrency: int = 8  # Parallel cap for neighbor expansion
     search_expansion_max_level: int = 3  # How many times the UI can widen search scope
     search_expansion_seed_step: int = 30  # Extra Vespa seeds fetched per widen level
     search_expansion_result_step: int = 5  # Extra snippets surfaced per widen level

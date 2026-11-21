@@ -124,7 +124,9 @@ export default function ModelPicker({
         className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium text-gray-700"
       >
         <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-        <span>{selectedModel?.label || "Select Model"}</span>
+        <span className="max-w-48 truncate" title={selectedModel?.label}>
+          {selectedModel?.label || "Select Model"}
+        </span>
         <svg
           className={`w-4 h-4 transition-transform ${
             isOpen ? "rotate-180" : ""
@@ -148,12 +150,12 @@ export default function ModelPicker({
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           ></div>
-          <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+          <div className="absolute top-full left-0 mt-1 w-80 max-h-60 overflow-hidden bg-white rounded-lg shadow-lg border border-gray-200 z-20">
             <div className="p-2">
               <div className="text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-100">
                 Available Models
               </div>
-              <div className="py-1">
+              <div className="py-1 max-h-48 overflow-y-auto">
                 {models.map((model) => (
                   <button
                     key={model.id}
@@ -170,7 +172,12 @@ export default function ModelPicker({
                           selected === model.id ? "bg-blue-500" : "bg-gray-300"
                         }`}
                       ></div>
-                      <span>{model.label}</span>
+                      <span
+                        className="truncate min-w-0 flex-1"
+                        title={model.label}
+                      >
+                        {model.label}
+                      </span>
                       {selected === model.id && (
                         <svg
                           className="w-4 h-4 ml-auto text-blue-500"

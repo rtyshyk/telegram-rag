@@ -18,7 +18,9 @@ def test_qwen_embedding_price():
 
 
 def test_unknown_model_uses_nebius_default():
-    assert embedding_price_per_1k("vendor/unknown-embed") == DEFAULT_EMBEDDING_USD_PER_1K
+    assert (
+        embedding_price_per_1k("vendor/unknown-embed") == DEFAULT_EMBEDDING_USD_PER_1K
+    )
 
 
 def test_count_embedding_tokens_nonzero():

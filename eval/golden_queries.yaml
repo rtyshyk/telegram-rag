@@ -1,0 +1,38 @@
+# Synthetic golden queries for search eval (no production chat IDs or PII).
+# Live runs: SEARCH_EVAL_LIVE=1 against local Vespa/API — not required in CI.
+
+artifact_contract: eval/golden-queries/v1
+
+queries:
+  - id: homestager-recommend-v1
+    query: "посоветуйте хоумстейджера"
+    source: chat
+    lexicon:
+      - pattern: "(?i)хоумстейджер"
+        description: "Russian translit homestager"
+    mode: keyword
+    expectations:
+      min_lexical_hits_at_k: 1
+      k: 10
+    notes: |
+      Primary incident query. CI uses mocked Vespa; live rank checks via env, not committed artifacts.
+
+  - id: homestager-keyword-v1
+    query: "хоумстейджеры"
+    source: search
+    lexicon:
+      - pattern: "(?i)хоумстейджер"
+    mode: keyword
+    expectations:
+      min_lexical_hits_at_k: 1
+      k: 10
+
+  - id: homestager-recommendations-v1
+    query: "рекомендации хоумстейджеров"
+    source: search
+    lexicon:
+      - pattern: "(?i)хоумстейджер"
+    mode: keyword
+    expectations:
+      min_lexical_hits_at_k: 1
+      k: 10

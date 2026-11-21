@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import ModelPicker from "./ModelPicker";
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
 import * as api from "../lib/api";
@@ -41,6 +41,19 @@ test("ModelPicker loads options and stores selection", async () => {
   await waitFor(() => {
     expect(mockOnModelChange).toHaveBeenCalledWith("test/chat-model");
   });
+});
+
+test("ModelPicker dropdown list is scrollable", async () => {
+  const { getByRole, getByText } = render(<ModelPicker />);
+  const trigger = await waitFor(() =>
+    getByRole("button", { name: /Test Chat/ }),
+  );
+  fireEvent.click(trigger);
+  const list = await waitFor(
+    () => getByText("Available Models").nextElementSibling,
+  );
+  expect(list?.className).toContain("overflow-y-auto");
+  expect(list?.className).toContain("max-h-48");
 });
 
 test("ModelPicker shows error when models fail to load", async () => {

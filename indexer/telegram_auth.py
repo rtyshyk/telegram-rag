@@ -21,7 +21,9 @@ def print_qr_login_url(url: str) -> None:
     qr.add_data(url)
     qr.make(fit=True)
     qr.print_ascii(invert=True)
-    print(f"\nLink (Telegram mobile → Settings → Devices → Link Desktop Device):\n{url}\n")
+    print(
+        f"\nLink (Telegram mobile → Settings → Devices → Link Desktop Device):\n{url}\n"
+    )
 
 
 async def _sign_in_2fa(client: TelegramClient) -> None:

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
@@ -15,6 +15,128 @@ from pydantic import BaseModel, Field, field_validator
 from .settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Tokenization for query analysis (same character class as VespaSearchClient)
+_QUERY_TOKEN_RE = re.compile(r"[0-9A-Za-z\u0400-\u04FF]+", re.UNICODE)
+# Ukrainian-specific letters (if present, prefer language "uk" for BM25 stemmer)
+_UKRAINIAN_SPECIFIC_RE = re.compile(r"[іїєґ]", re.IGNORECASE)
+# RU short-query stopwords: ignored when counting "significant" tokens for short-query mode
+_SHORT_QUERY_STOPWORDS = frozenset(
+    {
+        "и",
+        "в",
+        "во",
+        "не",
+        "на",
+        "но",
+        "по",
+        "за",
+        "из",
+        "к",
+        "ко",
+        "о",
+        "об",
+        "от",
+        "до",
+        "при",
+        "для",
+        "что",
+        "как",
+        "это",
+        "так",
+        "ли",
+        "же",
+        "бы",
+        "б",
+        "лишь",
+        "уж",
+        "уже",
+        "мы",
+        "вы",
+        "он",
+        "она",
+        "они",
+        "оно",
+        "я",
+        "ты",
+        "а",
+        "же",
+    }
+)
+
+_IMPERATIVE_STOPWORDS = frozenset(
+    {
+        "посоветуйте",
+        "посоветуй",
+        "порекомендуйте",
+        "порекомендуй",
+        "подскажите",
+        "подскажи",
+        "найди",
+        "найдите",
+        "recommend",
+        "suggest",
+    }
+)
+
+_HEAD_TERM_HOMESTAGER_RE = re.compile(r"(?i)хоумстейдж")
+_SHORT_LEXICAL_CONTENT_RE = re.compile(r"(?i)хоумстейджер|хоумстейджинг|homestag")
+
+_CYRILLIC_TOKEN_RE = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
+
+
+def _normalize_query_whitespace(value: str) -> str:
+    return " ".join(value.split())
+
+
+def count_significant_query_tokens(query: str) -> int:
+    """Count non-trivial tokens (stopwords and pure punctuation excluded)."""
+    cleaned = _normalize_query_whitespace(query)
+    if not cleaned:
+        return 0
+    tokens = _QUERY_TOKEN_RE.findall(cleaned.lower())
+    significant = 0
+    for tok in tokens:
+        if not tok.strip("0123456789."):
+            continue
+        if tok in _SHORT_QUERY_STOPWORDS:
+            continue
+        significant += 1
+    return significant
+
+
+def extract_head_term(query: str) -> str:
+    """Return the subject token for imperative short queries (e.g. homestager stem)."""
+    cleaned = _normalize_query_whitespace(query)
+    if not cleaned:
+        return ""
+    tokens = _QUERY_TOKEN_RE.findall(cleaned.lower())
+    significant: List[str] = []
+    for tok in tokens:
+        if not tok.strip("0123456789."):
+            continue
+        if tok in _SHORT_QUERY_STOPWORDS or tok in _IMPERATIVE_STOPWORDS:
+            continue
+        significant.append(tok)
+    if not significant:
+        return cleaned
+    head = significant[-1]
+    if _HEAD_TERM_HOMESTAGER_RE.search(head):
+        return "хоумстейджер"
+    return head
+
+
+def is_short_lexical_query(query: str) -> bool:
+    """True when the query is a short keyword-style lookup (lexical-first ranking)."""
+    cleaned = _normalize_query_whitespace(query)
+    if not cleaned:
+        return False
+    tokens = _QUERY_TOKEN_RE.findall(cleaned.lower())
+    has_cyrillic = any(_CYRILLIC_TOKEN_RE.search(t) for t in tokens)
+    if not has_cyrillic:
+        return False
+    n = count_significant_query_tokens(query)
+    return 0 < n <= settings.search_short_query_max_significant_tokens
 
 
 class SearchRequest(BaseModel):
@@ -262,13 +384,16 @@ class VoyageReranker:
 class VespaSearchClient:
     _CYRILLIC_RE = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
     _LOG_VECTOR_MARKERS = ("vector", "embedding")
-    _TOKEN_RE = re.compile(r"[0-9A-Za-z\u0400-\u04FF]+", re.UNICODE)
+    _TOKEN_RE = _QUERY_TOKEN_RE
 
     def __init__(self, http: Optional[httpx.AsyncClient] = None):
         self.endpoint = settings.vespa_endpoint.rstrip("/")
         self.http = http or httpx.AsyncClient(timeout=20)
         self.embedder = EmbeddingProvider()
         self.reranker: Optional[VoyageReranker] = None
+        self._expansion_semaphore = asyncio.Semaphore(
+            max(1, settings.search_expansion_concurrency)
+        )
 
         if settings.rerank_enabled:
             reranker = VoyageReranker()
@@ -323,6 +448,31 @@ class VespaSearchClient:
         if self.reranker:
             await self.reranker.aclose()
 
+    @staticmethod
+    def _message_date_epoch_seconds(value: Optional[int]) -> int:
+        """Normalize message_date to unix seconds for sorting (handles ms)."""
+        if value is None:
+            return 0
+        if value < 10_000_000_000:
+            return value
+        return value // 1000
+
+    @staticmethod
+    def _selection_rank_key(candidate: SearchResult) -> Tuple[float, int]:
+        """Highest score first; on tie, newer message first."""
+        return (
+            candidate.seed_score,
+            VespaSearchClient._message_date_epoch_seconds(candidate.message_date),
+        )
+
+    @staticmethod
+    def _recency_display_key(candidate: SearchResult) -> Tuple[int, float]:
+        """Newest first within the result window; score breaks date ties."""
+        return (
+            VespaSearchClient._message_date_epoch_seconds(candidate.message_date),
+            candidate.seed_score,
+        )
+
     async def search(self, req: SearchRequest) -> List[SearchResult]:
         query = req.q.strip()
         if not query:
@@ -353,21 +503,64 @@ class VespaSearchClient:
             else req.model_copy(update={"limit": seed_limit})
         )
 
-        _, body, _ = await self._build_query(seed_request)
+        short_lexical = is_short_lexical_query(query)
+        short_strict = bool(req.hybrid and short_lexical)
+        head_term = extract_head_term(query) if short_lexical else query
 
+        _, body, _ = await self._build_query(seed_request)
         try:
             data = await self._execute_search(body)
         except Exception as exc:
             logger.error("Vespa search error: %s", exc)
             return []
+
         root = data.get("root", {}) or {}
         raw_hits = root.get("children", []) or []
-        self._log_stage("vespa_results", {"raw_hits": raw_hits})
+        total_count = root.get("fields", {}).get("totalCount")
+
+        if short_strict and not raw_hits:
+            logger.info(
+                "Short lexical hybrid returned no hits (strict ANN AND BM25); retrying with OR fusion."
+            )
+            _, body_relaxed, _ = await self._build_query(
+                seed_request, relax_short_lexical_and=True
+            )
+            try:
+                data = await self._execute_search(body_relaxed)
+            except Exception as exc:
+                logger.error("Vespa search error (relaxed short query): %s", exc)
+                return []
+            root = data.get("root", {}) or {}
+            raw_hits = root.get("children", []) or []
+            total_count = root.get("fields", {}).get("totalCount")
+
+        self._log_stage(
+            "vespa_results",
+            {"raw_hits": raw_hits, "totalCount": total_count},
+        )
 
         seed_hits = self._parse_seed_hits(raw_hits)
+        if (
+            req.hybrid
+            and short_lexical
+            and head_term
+            and head_term != _normalize_query_whitespace(query).lower()
+        ):
+            supplement = await self._fetch_lexical_supplement_seeds(
+                seed_request, head_term
+            )
+            seed_hits = self._merge_lexical_first_seeds(
+                seed_hits, supplement, head_term=head_term
+            )
         self._log_stage("seed_list", {"seeds": seed_hits})
 
         filtered_seeds = self._filter_seeds(seed_hits)
+        if short_lexical and head_term:
+            filtered_seeds = self._order_seeds_lexical_first(
+                filtered_seeds, head_term=head_term
+            )
+            cap = max(1, settings.search_short_lexical_seed_cap)
+            filtered_seeds = filtered_seeds[:cap]
         self._log_stage("seed_list_deduped", {"seeds": filtered_seeds})
 
         if not filtered_seeds:
@@ -379,22 +572,7 @@ class VespaSearchClient:
             self._log_stage("gpt_context", [])
             return []
 
-        expand_tasks = [self._build_candidate(seed) for seed in filtered_seeds]
-        expanded = await asyncio.gather(*expand_tasks, return_exceptions=True)
-
-        candidates: List[SearchResult] = []
-        for seed, result in zip(filtered_seeds, expanded):
-            if isinstance(result, Exception):
-                logger.warning(
-                    "Context expansion failed for %s:%s → %s",
-                    seed.chat_id,
-                    seed.message_id,
-                    result,
-                )
-                continue
-            if result is None:
-                continue
-            candidates.append(result)
+        candidates = await self._expand_seeds_bounded(filtered_seeds)
 
         if not candidates:
             rerank_status = bool(self.reranker and self.reranker.enabled)
@@ -405,13 +583,7 @@ class VespaSearchClient:
             self._log_stage("gpt_context", [])
             return []
 
-        candidates.sort(
-            key=lambda c: (
-                c.message_date or 0,
-                c.seed_score,
-            ),
-            reverse=True,
-        )
+        candidates.sort(key=self._selection_rank_key, reverse=True)
 
         reranker = self.reranker
         rerank_enabled = bool(reranker and reranker.enabled)
@@ -425,15 +597,16 @@ class VespaSearchClient:
             rerank_results = await reranker.rerank(
                 query, limited_candidates, final_limit
             )
+            final_candidates = rerank_results
         else:
-            rerank_results = candidates
+            final_candidates = candidates[:final_limit]
+            if not short_lexical:
+                final_candidates.sort(key=self._recency_display_key, reverse=True)
 
         self._log_stage(
             "rerank_results",
-            {"rerank_enabled": rerank_enabled, "results": rerank_results},
+            {"rerank_enabled": rerank_enabled, "results": final_candidates},
         )
-
-        final_candidates = rerank_results[:final_limit]
         self._log_stage(
             "gpt_context",
             [
@@ -455,6 +628,100 @@ class VespaSearchClient:
         resp = await self.http.post(f"{self.endpoint}/search/", json=body)
         resp.raise_for_status()
         return resp.json()
+
+    @staticmethod
+    def _seed_matches_head_term(text: str, head_term: str) -> bool:
+        if not head_term:
+            return False
+        if _HEAD_TERM_HOMESTAGER_RE.search(head_term):
+            return bool(_SHORT_LEXICAL_CONTENT_RE.search(text))
+        return head_term.lower() in text.lower()
+
+    def _merge_lexical_first_seeds(
+        self,
+        primary: List[SeedHit],
+        supplemental: List[SeedHit],
+        *,
+        head_term: str,
+    ) -> List[SeedHit]:
+        by_key: Dict[Tuple[str, int], SeedHit] = {}
+        for seed in primary + supplemental:
+            key = (seed.chat_id, seed.message_id)
+            existing = by_key.get(key)
+            if existing is None or seed.score > existing.score:
+                by_key[key] = seed
+        lexical = [
+            s
+            for s in by_key.values()
+            if self._seed_matches_head_term(s.text, head_term)
+        ]
+        non_lexical = [
+            s
+            for s in by_key.values()
+            if not self._seed_matches_head_term(s.text, head_term)
+        ]
+        lexical.sort(key=lambda s: s.score, reverse=True)
+        non_lexical.sort(key=lambda s: s.score, reverse=True)
+        cap = max(0, settings.search_short_lexical_non_lexical_cap)
+        if lexical:
+            non_lexical = non_lexical[:cap]
+        return lexical + non_lexical
+
+    def _order_seeds_lexical_first(
+        self, seeds: List[SeedHit], *, head_term: str
+    ) -> List[SeedHit]:
+        if not seeds:
+            return seeds
+        lexical = [s for s in seeds if self._seed_matches_head_term(s.text, head_term)]
+        non_lexical = [
+            s for s in seeds if not self._seed_matches_head_term(s.text, head_term)
+        ]
+        lexical.sort(key=lambda s: s.score, reverse=True)
+        non_lexical.sort(key=lambda s: s.score, reverse=True)
+        cap = max(0, settings.search_short_lexical_non_lexical_cap)
+        if lexical:
+            non_lexical = non_lexical[:cap]
+        return lexical + non_lexical
+
+    async def _fetch_lexical_supplement_seeds(
+        self, req: SearchRequest, head_term: str
+    ) -> List[SeedHit]:
+        hits = max(1, settings.search_lexical_supplement_hits)
+        supplement = req.model_copy(
+            update={"q": head_term, "hybrid": False, "limit": hits}
+        )
+        _, body, _ = await self._build_query(supplement, bm25_query_override=head_term)
+        try:
+            data = await self._execute_search(body)
+        except Exception as exc:
+            logger.warning("Lexical supplement search failed: %s", exc)
+            return []
+        children = (data.get("root") or {}).get("children") or []
+        return self._parse_seed_hits(children)
+
+    async def _expand_seeds_bounded(self, seeds: List[SeedHit]) -> List[SearchResult]:
+        async def expand_one(seed: SeedHit) -> SearchResult | Exception | None:
+            async with self._expansion_semaphore:
+                try:
+                    return await self._build_candidate(seed)
+                except Exception as exc:
+                    return exc
+
+        expanded = await asyncio.gather(*(expand_one(seed) for seed in seeds))
+        candidates: List[SearchResult] = []
+        for seed, result in zip(seeds, expanded):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "Context expansion failed for %s:%s → %s",
+                    seed.chat_id,
+                    seed.message_id,
+                    result,
+                )
+                continue
+            if result is None:
+                continue
+            candidates.append(result)
+        return candidates
 
     def _parse_seed_hits(
         self, hits: Optional[Sequence[Dict[str, Any]]]
@@ -815,7 +1082,14 @@ class VespaSearchClient:
             return cleaned, None
 
         uses_cyrillic = any(self._CYRILLIC_RE.search(token) for token in tokens)
-        language_hint = "uk" if uses_cyrillic else None
+        if not uses_cyrillic:
+            return cleaned, None
+        # RU vs UA: stemmers differ; Ukrainian text often contains ї/і/є/ґ.
+        joined = " ".join(tokens)
+        if _UKRAINIAN_SPECIFIC_RE.search(joined):
+            language_hint = "uk"
+        else:
+            language_hint = "ru"
         return cleaned, language_hint
 
     def _safe_text(self, value: Any) -> str:
@@ -940,9 +1214,17 @@ class VespaSearchClient:
         return chats
 
     async def _build_query(
-        self, req: SearchRequest
+        self,
+        req: SearchRequest,
+        *,
+        relax_short_lexical_and: bool = False,
+        bm25_query_override: Optional[str] = None,
     ) -> tuple[str, Dict[str, Any], Dict[str, str]]:
-        """Build YQL, body, and query params for a search request (side-effect: may embed)."""
+        """Build YQL, body, and query params for a search request (side-effect: may embed).
+
+        When relax_short_lexical_and is True, short Cyrillic queries use OR fusion (ANN or BM25)
+        instead of AND, e.g. for a second attempt after an empty strict intersection.
+        """
         yql_parts = ["select * from sources * where"]
         filters = []
         if req.chat_id:
@@ -960,11 +1242,13 @@ class VespaSearchClient:
         if settings.embed_dimensions == 1536:
             vector_field = "vector_small"
             ranking_profile = "hybrid-small"
+            ranking_profile_short = "hybrid-small-short"
             tensor_param = "qv_small"
             expected_dims = 1536
         else:
             vector_field = "vector_large"
             ranking_profile = "hybrid-large"
+            ranking_profile_short = "hybrid-large-short"
             tensor_param = "qv_large"
             expected_dims = 3072
 
@@ -983,31 +1267,50 @@ class VespaSearchClient:
                 )
                 req.hybrid = False
 
-        bm25_query, language_hint = self._prepare_bm25_query(req.q)
+        bm25_source = req.q
+        if bm25_query_override:
+            bm25_source = bm25_query_override
+        elif req.hybrid and is_short_lexical_query(req.q):
+            head_term = extract_head_term(req.q)
+            if head_term and head_term != _normalize_query_whitespace(req.q).lower():
+                bm25_source = head_term
+        bm25_query, language_hint = self._prepare_bm25_query(bm25_source)
 
         bm25_clause = f"(userInput(@q))"
+        short_lexical = bool(req.hybrid and is_short_lexical_query(req.q))
+        short_strict = short_lexical and not relax_short_lexical_and
         where_segments = []
 
-        # Enable vector clause for hybrid search
+        # Hybrid: vector + BM25 (OR by default; AND for short lexical queries unless relaxed)
         if vector_clause and req.hybrid and embedded_vector is not None:
-            where_segments.append(vector_clause)
+            if short_strict:
+                # Require both ANN neighbor and BM25 match so unrelated fresh threads rank lower.
+                where_segments.append(f"({vector_clause} and {bm25_clause})")
+            else:
+                where_segments.append(vector_clause)
+                where_segments.append(bm25_clause)
+        else:
+            where_segments.append(bm25_clause)
 
-        where_segments.append(bm25_clause)
         core_clause = " or ".join(where_segments)
         if filters:
             core_clause = f"({core_clause}) and (" + " and ".join(filters) + ")"
         yql_parts.append(core_clause)
         yql = " ".join(yql_parts)
 
+        active_ranking = (
+            (ranking_profile_short if short_lexical else ranking_profile)
+            if req.hybrid
+            else "default"
+        )
         body: Dict[str, Any] = {
             "yql": yql,
             "hits": req.limit,
-            "ranking": ranking_profile if req.hybrid else "default",
+            "ranking": active_ranking,
             "timeout": "5s",
             "q": bm25_query,
         }
 
-        # Add tensor in the correct format for Vespa
         if req.hybrid and embedded_vector is not None:
             body[f"input.query({tensor_param})"] = embedded_vector
 

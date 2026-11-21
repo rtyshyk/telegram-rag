@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,11 +14,22 @@ import tiktoken
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from .search import SearchRequest, SearchResult, get_search_client
+from .search import (
+    SearchRequest,
+    SearchResult,
+    get_search_client,
+    is_short_lexical_query,
+)
 from .openai_client import create_openai_client
 from .settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Conversational replies that do not need a Telegram lookup.
+_ACK_ONLY_RE = re.compile(
+    r"^(?:thanks|thank you|thx|ok|okay|спасибо|благодарю|понятно|ясно|привет|hello|hi|yes|no|да|нет)[.!?\s]*$",
+    re.IGNORECASE,
+)
 
 
 class ChatMessage(BaseModel):
@@ -342,7 +354,12 @@ class SearchDecisionMaker:
             )
 
             decision = response.choices[0].message.content.strip().upper()
-            should_search = decision != "SKIP_SEARCH"
+            skip = decision == "SKIP_SEARCH"
+            acknowledgement = bool(_ACK_ONLY_RE.match(question.strip()))
+            # A lookup must still hit Vespa. SKIP_SEARCH is only kept for
+            # acknowledgements; the decision model otherwise skips real queries
+            # once a previous turn already said the data was missing.
+            should_search = not (skip and acknowledgement)
 
             logger.debug(
                 f"Search decision for '{question[:50]}...': {decision} -> {should_search}"
@@ -429,7 +446,13 @@ class ChatService:
 
             # Query reformulation phase (only if we'll search)
             reformulated_query = request.q
-            if should_search and request.history and len(request.history) > 0:
+            skip_reformulation = is_short_lexical_query(request.q)
+            if (
+                should_search
+                and request.history
+                and len(request.history) > 0
+                and not skip_reformulation
+            ):
                 yield f"data: {ChatStreamChunk(type='reformulate', content='Analyzing conversation context...').model_dump_json()}\n\n"
 
                 reformulated_query = await self.query_reformulator.reformulate_query(

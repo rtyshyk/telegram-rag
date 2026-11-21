@@ -95,7 +95,17 @@ schema message {
       expression: 1.6 * closeness(vector_small) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
     }
   }
-  
+
+  # Short keyword queries: emphasize lexical match; reduce vector and recency dominance.
+  rank-profile hybrid-small-short {
+    inputs {
+      query(qv_small) tensor<float>(x[1536])
+    }
+    first-phase {
+      expression: 0.85 * closeness(vector_small) + 1.15 * bm25(text) + 0.4 * bm25(bm25_text) + 0.35 * freshness(message_date)
+    }
+  }
+
   rank-profile hybrid-large {
     inputs {
       query(qv_large) tensor<float>(x[3072])
@@ -103,6 +113,15 @@ schema message {
     first-phase {
       # nearestNeighbor(vector_large,qv_large) adds closeness(vector_large)
       expression: 1.6 * closeness(vector_large) + 0.9 * bm25(text) + 0.3 * bm25(bm25_text) + freshness(message_date)
+    }
+  }
+
+  rank-profile hybrid-large-short {
+    inputs {
+      query(qv_large) tensor<float>(x[3072])
+    }
+    first-phase {
+      expression: 0.85 * closeness(vector_large) + 1.15 * bm25(text) + 0.4 * bm25(bm25_text) + 0.35 * freshness(message_date)
     }
   }
   

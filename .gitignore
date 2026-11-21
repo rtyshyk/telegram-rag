@@ -11,3 +11,9 @@ ui/test-results/
 .venv/
 cookies.txt
 indexer/sessions
+
+# Local implementation plans (not shared via git)
+docs/plans/
+
+# Live search eval artifacts (may contain stderr with real chat/message ids)
+eval/*_latest.json

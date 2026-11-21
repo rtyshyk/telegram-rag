@@ -15,7 +15,7 @@
 - `make precommit`: Run all pre-commit hooks (format/lint).
 - `make test-python`: Run Python tests (`api/tests`, `indexer/tests`).
 - `make test-ui`: Run UI unit tests (vitest). `make test-ui-e2e`: Playwright E2E.
-- Run stack: `docker compose up -d --build` when using shared Postgres (`DATABASE_URL` → `common-pg`); add `--profile personal-db` when `.env` uses host `postgres`. Vespa app auto-deploys.
+- Run stack: start sibling `../common-infra/pg`, then `docker compose up -d --build` (`DATABASE_URL` host `common-pg`). Add `--profile personal-db` only when `.env` uses host `postgres`. Vespa app auto-deploys.
 
 ## Coding Style & Naming
 
